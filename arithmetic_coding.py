@@ -1,3 +1,24 @@
+"""
+ARITHMETIC CODING
+-----------------
+
+This script contains some functions pertinent to arithmetic coding, i.e.,
+the coding scheme in which a single Shannon-Fano-Elias codeword is chosen
+for an entire text using a very careful branching scheme in which the unit
+interval is repeatedly divided up in segments whose sizes correspond to
+predictive probabilities. Arithmetic coding is described in the 1976 paper
+"Generalized Kraft Inequality and Arithmetic Coding" by Jorma Rissanen.
+
+This script was used in the 2018 NASSLLI course on information theory,
+
+    https://www.cmu.edu/nasslli2018/courses/index.html#infotheory
+
+For more information, contact me on mathias@micropsi-industries.com.
+
+                                            Mathias Winther Madsen
+                                            Berlin, 3 July 2018
+"""
+
 import numpy as np
 
 
