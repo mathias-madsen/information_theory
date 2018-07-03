@@ -1,186 +1,161 @@
 import numpy as np
 
 
-class PredictiveModel(object):
+def find_outer_binary_interval(left, width):
+    """ Find the code for a binary interval containing the deciaml interval. """
 
-    def __init__(self, alphabet="ABC"):
+    bits = ""
 
-        self.alphabet = sorted(alphabet)
+    while True:
 
-    def conditionals(self, context):
-        """ Compute the conditional distribution given the context. """
+        if left + width <= 1/2:
+            bits += "0"
+            left = 2*left
+            width = 2*width
 
-        raise NotImplementedError
+        elif left >= 1/2:
+            bits += "1"
+            left = 2*left - 1
+            width = 2*width
 
-    def conditional(self, context, letter):
-        """ Compute P(letter | context). """
-
-        distribution = self.conditionals(context)
-
-        return distribution[letter]
-
-    def cumulatives(self, context):
-        """ Compute the cumulative distribution vector given the context. """
-
-        distribution = self.conditionals(context)
-        probabilities = [distribution[a] for a in self.alphabet]
-
-        return np.cumsum([0] + probabilities)
-
-    def cumulative(self, context, letter):
-        """ Compute P(letter | context) for all letters more to the 'left'. """
-
-        cumulatives = self.cumulatives(context)
-        letter_index = self.alphabet.index(letter)
-
-        return cumulatives[letter_index]
-
-    def sample(self, length):
-        """ Sample a sequence of the given lenghth from this random process. """
-
-        text = ""
-
-        for t in range(length):
-            distribution = self.conditionals(text)
-            letters = sorted(distribution.keys())
-            probabilities = [distribution[letter] for letter in letters]
-            text += np.random.choice(letters, p=probabilities)
-
-        return text
-
-
-class PolyaUrnModel(PredictiveModel):
-
-    def conditionals(self, context):
-        """ Compute the conditional distribution given the context. """
-
-        frequencies = np.array([context.count(a) for a in self.alphabet])
-        smooth_frequences = 1 + frequencies
-        probabilities = smooth_frequences / np.sum(smooth_frequences)
-
-        return dict(zip(self.alphabet, probabilities))
-
-
-class MarkovModel(PredictiveModel):
-
-    def __init__(self, alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ "):
-
-        self.alphabet = sorted(alphabet)
-
-        alpha = np.ones(len(self.alphabet))
-        self.initials = np.random.dirichlet(alpha)
-        self.transitions = {letter: np.random.dirichlet(alpha)
-                            for letter in self.alphabet}
-
-    def conditionals(self, context):
-        """ Compute the conditional distribution given the context. """
-
-        if context:
-            probabilities = self.transitions[context[-1]]
         else:
-            probabilities = self.initials
+            break
 
-        return dict(zip(self.alphabet, probabilities))
+    return bits
 
+
+def find_inner_binary_interval(left, width):
+    """ Find the Shannon-Fano-Elias codeword for this decimal interval. """
+
+    num_bits = 0
+
+    while True:
+
+        num_steps = 2 ** num_bits
+        step_width = 1 / num_steps
+
+        for i in range(num_steps):
+            step_left = i * step_width
+            if left <= step_left and step_left + step_width <= left + width:
+                return np.binary_repr(i, width=num_bits)
+
+        num_bits += 1
+
+
+def zoom_to_outer_binary_interval(left, width, code):
+    """ Represent an inner interval as if its binary container was [0, 1]. """
+
+    for bit in code:
+        if bit == "0":
+            left = 2*left
+            width = 2*width
+        elif bit == "1":
+            left = 2*left - 1
+            width = 2*width
+        else:
+            raise Exception("Unexpected bit: %r" % bit)
+
+    return left, width
+
+
+def find_index_of_outer_decimal(fences, bits):
+    """ Find the index of the segment containing the binary interval.  """
+
+    for w in range(len(bits) + 1):
+
+        substring = bits[:w]
+        bitint = 0 if not substring else int(bits[:w], base=2)
+        bitleft = bitint / 2**w
+        bitwidth = 1 / 2**w
+
+        for i, (left, right) in enumerate(zip(fences[:-1], fences[1:])):
+            if left <= bitleft and bitleft + bitwidth <= right:
+                # print("match: index %s\n" % i)
+                return i, substring
+
+    for w in range(len(bits) + 1):
+
+        substring = bits[:w]
+        bitint = 0 if not substring else int(bits[:w], base=2)
+        bitleft = bitint / 2**w
+        bitwidth = 1 / 2**w
+
+    return -1, ""
 
 
 def encode(plaintext, model):
-    """ Encode the given string using arithmetic coding.
+    """ Encode the text using a predictive model and an arithmetic encoder. """
 
-    Arguments:
-    ----------
-    text : str
-        The string to be encoded.
-    model : PredictiveModel object
-        An object with .conditional and .cumulative methods.
-    """
+    left = np.float64(0)
+    width = np.float64(1)
 
     encoding = ""
 
-    left = 0.
-    width = 1.
-
     for t, letter in enumerate(plaintext):
 
-        # modify the current subinterval:
+        # commit to any bits that have already settled:
+        outer_binary = find_outer_binary_interval(left, width)
+        left, width = zoom_to_outer_binary_interval(left, width, outer_binary)
+        encoding += outer_binary
+
+        # subdivide the remaining interval:
         context = plaintext[:t]
-        inner_width = model.conditional(context, letter)
-        inner_left = model.cumulative(context, letter)
-        left += width*inner_left
-        width *= inner_width
+        cumulatives = model.cumulatives(context)
+        fences = left + width*cumulatives
 
-        # zoom left or right as long as possible:
-        while True:
-            if left + width <= 0.5:
-                encoding += "0"
-                left = 2*left
-                width = 2*width
-            elif left >= 0.5:
-                encoding += "1"
-                left = 2*(left - 0.5)
-                width = 2*width
-            else:
-                break
+        # select the interval corresponding to the next choice:
+        i = model.alphabet.index(letter)
+        left = fences[i]
+        width = fences[i + 1] - fences[i]
 
-    # find the inner binary interval:
-    bits = int(1 + np.ceil(-np.log2(width)))
-    divisions = 2 ** bits
-    for i in range(divisions):
-        if left <= i/divisions and (1 + i)/divisions <= left + width:
-            encoding += np.binary_repr(i, width=bits)
+    # add bits that have become certain only at the end of the file:
+    encoding += find_inner_binary_interval(left, width)
 
     return encoding
 
 
 def decode(codetext, model):
+    """ Decode the text using a predictive model and an arithmetic encoder. """
+
+    left = np.float64(0)
+    width = np.float64(1)
 
     decoding = ""
 
-    binary_left = 0.
-    binary_width = 1.
+    while True:
 
-    for t, bit in enumerate(codetext):
+        outer_binary = find_outer_binary_interval(left, width)
+        left, width = zoom_to_outer_binary_interval(left, width, outer_binary)
+        codetext = codetext[len(outer_binary):]
 
-        # zoom the binary interval to its lower or upper half,
-        # according to the value of the next bit in the queue:
-        assert bit == "0" or bit == "1", bit
-        binary_width *= 0.5
-        if bit == "1":
-            binary_left += binary_width
+        context = decoding
+        cumulatives = model.cumulatives(context)
+        fences = left + width*cumulatives
 
-        # if the binary interval is completely contained in a predictive
-        # interval or subinterval, output the corresponding letters:
-        while True:
-            cumulatives = model.cumulatives(decoding)
-            for i in range(len(cumulatives) - 1):
-                letter = model.alphabet[i]
-                left = cumulatives[i]
-                right = cumulatives[i + 1]
-                width = right - left
-                if left <= binary_left and binary_left + binary_width <= right:
-                    decoding += letter
-                    assert binary_width <= width, (binary_width, width)
-                    binary_left = (binary_left - left) / width
-                    binary_width = binary_width / width
-                    break  # exit the for loop
-            else:
-                break  # if we did not exit the for loop, exit the while loop
+        i, codeword = find_index_of_outer_decimal(fences, codetext)
 
-    return decoding
+        if i == -1:
+            return decoding
+
+        left = fences[i]
+        width = fences[i + 1] - fences[i]
+
+        decoding += model.alphabet[i]
+
+        if not codetext:
+            return decoding
 
 
+if __name__ == "__main__":
 
+    from predictive_model import PolyaUrnModel, MarkovModel
 
-
-my_model = PolyaUrnModel()
-my_model = MarkovModel()
-
-original_text = my_model.sample(80)
-encoded_text = encode(original_text, my_model)
-decoded_text = decode(encoded_text, my_model)
-
-print(original_text)
-print(encoded_text)
-print(decoded_text)
-
-assert original_text == decoded_text
+    model = MarkovModel()
+    text = model.sample(100)
+    print("Encoding . . .")
+    encoded = encode(text, model)
+    print("Decoding . . .")
+    decoded = decode(encoded, model)
+    print("Comparing . . .")
+    assert text == decoded
+    print("Done.\n")
