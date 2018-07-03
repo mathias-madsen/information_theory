@@ -2,8 +2,37 @@ import numpy as np
 
 
 def find_outer_binary_interval(left, width):
-    """ Find the code for a binary interval containing the deciaml interval. """
+    """ Find the code for a binary interval containing the deciaml interval.
 
+    Arguments:
+    ----------
+    left : float in [0, 1]
+        The left-hand edge of the interval.
+    width : float in [0, 1]
+        The width of the interval.
+
+    Returns:
+    --------
+    bits : str
+        A string of bits that represents the smallest binary interval that
+        contains the inner decimal interval.
+
+    Notes:
+    ------
+    We test all inequalities using `<=` rather than `<`. This only makes a
+    difference for arithmetic coding in case of events of probability zero.
+
+    Examples:
+    ---------
+    >>> find_outer_binary_interval(0, 1/3)
+    '0'
+    >>> find_outer_binary_interval(3/4, 1/4)
+    '11'
+    """
+
+    assert 0 <= left <= 1
+    assert 0 <= width <= 1
+    
     bits = ""
 
     while True:
@@ -25,9 +54,41 @@ def find_outer_binary_interval(left, width):
 
 
 def find_inner_binary_interval(left, width):
-    """ Find the Shannon-Fano-Elias codeword for this decimal interval. """
+    """ Find the Shannon-Fano-Elias codeword for this decimal interval.
 
-    num_bits = 0
+    Arguments:
+    ----------
+    left : float in [0, 1]
+        The left-hand edge of the interval.
+    width : float in [0, 1]
+        The width of the interval.
+
+    Returns:
+    --------
+    bits : str
+        A string of bits that represents the widest binary interval that
+        fits inside of the outer decimal interval.
+
+    Notes:
+    ------
+    We test all inequalities using `<=` rather than `<`. This only makes a
+    difference for arithmetic coding in case of events of probability zero.
+
+    Examples:
+    ---------
+    >>> find_inner_binary_interval(0, 1/3)
+    '00'
+    >>> find_inner_binary_interval(3/4, 1/4)
+    '11'
+    """
+
+    assert 0 <= left <= 1
+    assert 0 <= width <= 1
+
+    if left == 0 and width == 1:
+        return ""
+    
+    num_bits = 1
 
     while True:
 
@@ -43,7 +104,38 @@ def find_inner_binary_interval(left, width):
 
 
 def zoom_to_outer_binary_interval(left, width, code):
-    """ Represent an inner interval as if its binary container was [0, 1]. """
+    """ Represent an inner interval as if its binary container was [0, 1].
+
+    Arguments:
+    ----------
+    left : float
+        The left-hand edge of the initial interval.
+    width : float
+        The width of the initial interval.
+    code : str
+        A string of bits representing sequence of bisections and subsequent
+        selections of either the lower ('0') or upper ('1') half-interval.
+
+    Returns:
+    --------
+    left : float
+        The left-hand edge of the interval relative to the binary interval
+        defined by the bitstring (rather than to relative to [0, 1]).
+    width : float
+        The width of the interval relative to the binary interval defined by
+        the bitstring (rather than relative to the unit interval [0, 1]).
+
+    Examples:
+    ---------
+    >>> zoom_to_outer_binary_interval(0.0, 0.25, "00")
+    (0.0, 1.0)
+    >>> zoom_to_outer_binary_interval(0.0, 0.125, "00")
+    (0.0, 0.5)
+    >>> zoom_to_outer_binary_interval(0.75, 1.00, "1")
+    (0.5, 2.0)
+    >>> zoom_to_outer_binary_interval(0, 1, "0")
+    (0, 2)
+    """
 
     for bit in code:
         if bit == "0":
@@ -58,33 +150,98 @@ def zoom_to_outer_binary_interval(left, width, code):
     return left, width
 
 
-def find_index_of_outer_decimal(fences, bits):
-    """ Find the index of the segment containing the binary interval.  """
+def find_index_of_outer_decimal(fences, bitstream):
+    """ Find the index of the segment containing the binary path.
 
-    for w in range(len(bits) + 1):
+    Arguments:
+    ----------
+    fences : iterable of floats
+        A sorted array or list of floats that divides the interval between
+        fences[0] and fences[-1] into more specific possibilities.
+    bits : str
+        A binary string representing a binary interval.
 
-        substring = bits[:w]
-        bitint = 0 if not substring else int(bits[:w], base=2)
+    Returns:
+    --------
+    index : int
+        The index of the subinterval (fences[i], fences[i + 1]) that envelops
+        the inner binary path, or -1 if no such index exists.
+    prefix : str
+        A binary string that represents the widest binary interval that can
+        be wrapped by one of the fenced sub-intervals.
+
+    Examples:
+    ---------
+    >>> find_index_of_outer_decimal([0, 1/3, 2/3, 1], "1000")
+    (1, '100')
+    >>> find_index_of_outer_decimal([0, 1], "0000")
+    (0, '')
+    >>> find_index_of_outer_decimal([1/2, 1], "0")
+    (-1, '')
+    """
+
+    for w in range(len(bitstream) + 1):
+
+        substring = bitstream[:w]
+        bitint = 0 if not substring else int(bitstream[:w], base=2)
         bitleft = bitint / 2**w
         bitwidth = 1 / 2**w
 
         for i, (left, right) in enumerate(zip(fences[:-1], fences[1:])):
             if left <= bitleft and bitleft + bitwidth <= right:
-                # print("match: index %s\n" % i)
                 return i, substring
-
-    for w in range(len(bits) + 1):
-
-        substring = bits[:w]
-        bitint = 0 if not substring else int(bits[:w], base=2)
-        bitleft = bitint / 2**w
-        bitwidth = 1 / 2**w
 
     return -1, ""
 
 
 def encode(plaintext, model):
-    """ Encode the text using a predictive model and an arithmetic encoder. """
+    """ Encode the text using a predictive model and an arithmetic encoder.
+
+    Arguments:
+    ----------
+    plaintext : str
+        The text to be encoded.
+    model : PredictiveModel
+        A PredictiveModel object which must have an .alphabet attribute and
+        a .cumulatives method that maps a string to an ordered sequence of
+        conditional continuation probabilities, presented in the same order
+        as the alphabet.
+
+    Returns:
+    --------
+    encoding : str
+        A binary string that uniquely represents the text.
+    
+    Notes:
+    ------
+    This encoder chooses a single Shannon-Fano-Elias codeword that represents
+    the entire input text. Divides up the unit interval in tiny segments, each
+    of which can then be named using a Shannon-Fano-Elias codeword, which is
+    to say, approximated by an inner binary interval.
+
+    This coding scheme in principle requires arbitrary-precision arithmetic.
+    We simulate this by zooming on an outer binary interval whenever we can.
+    This corresponds to yielding a binary digit whenever it beomes clear that
+    the final codeword must start with a given prefix.
+
+    Warning:
+    --------
+    This enoder has a weakness when it comes to very tiny intervals that
+    overlap both with the upper and lower half of the outer interval, as in
+
+                   remaining set of paths
+                        \         /
+        [-----------------(--|--)-----------------]
+
+         \________ outer binary interval ________/
+
+    Such intervals do no allow us to move the precision-handling from the
+    predictive interval (which has limited precision) to the outer interval
+    (which has as much precision as the machine's working memory permits),
+    since the overlap prevents any further zooming.
+
+    There are ways to address this problem, but they are not implemented here.
+    """
 
     left = np.float64(0)
     width = np.float64(1)
@@ -115,7 +272,23 @@ def encode(plaintext, model):
 
 
 def decode(codetext, model):
-    """ Decode the text using a predictive model and an arithmetic encoder. """
+    """ Decode the text using a predictive model and an arithmetic encoder.
+
+    Arguments:
+    ----------
+    codetext : str
+        A binary codeword for the input plaintext.
+    model : PredictiveModel
+        A PredictiveModel object which must have an .alphabet attribute and
+        a .cumulatives method that maps a string to an ordered sequence of
+        conditional continuation probabilities, presented in the same order
+        as the alphabet.
+
+    Returns:
+    --------
+    decoding : str
+        A reconstruction of the input plaintext.
+    """
 
     left = np.float64(0)
     width = np.float64(1)
