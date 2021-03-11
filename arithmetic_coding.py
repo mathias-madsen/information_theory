@@ -271,7 +271,7 @@ def encode(plaintext, model):
 
     for t, letter in enumerate(plaintext):
 
-        # commit to any bits that have already settled:
+       # commit to any bits that have already settled:
         outer_binary = find_outer_binary_interval(left, width)
         left, width = zoom_to_outer_binary_interval(left, width, outer_binary)
         encoding += outer_binary
@@ -286,8 +286,11 @@ def encode(plaintext, model):
         left = fences[i]
         width = fences[i + 1] - fences[i]
 
-    # add bits that have become certain only at the end of the file:
-    encoding += find_inner_binary_interval(left, width)
+     # add bits that have become certain only at the end of the file:
+    final_codeword = find_inner_binary_interval(left, width)
+    encoding += final_codeword
+
+    print(final_codeword)
 
     return encoding
 
@@ -329,6 +332,7 @@ def decode(codetext, model):
         i, codeword = find_index_of_outer_decimal(fences, codetext)
 
         if i == -1:
+            print("leftover", codetext, fences)
             return decoding
 
         left = fences[i]
@@ -342,14 +346,19 @@ def decode(codetext, model):
 
 if __name__ == "__main__":
 
-    from predictive_model import PolyaUrnModel, MarkovModel
+    from predictive_model import PolyaUrnModel, MarkovModel, MixedModel
 
-    model = MarkovModel()
+##    model = MarkovModel()
+    model = MixedModel()
     text = model.sample(100)
+
     print("Encoding . . .")
     encoded = encode(text, model)
     print("Decoding . . .")
     decoded = decode(encoded, model)
     print("Comparing . . .")
+    print(repr(text))
+    print(repr(decoded))
     assert text == decoded
     print("Done.\n")
+

@@ -81,3 +81,13 @@ class MarkovModel(PredictiveModel):
             probabilities = self.initials
 
         return dict(zip(self.alphabet, probabilities))
+
+
+class MixedModel(PredictiveModel):
+
+    def __init__(self, alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ "):
+
+        from mixed_model import alphabet, conditionals
+
+        self.alphabet = alphabet
+        self.conditionals = conditionals
