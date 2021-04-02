@@ -1,3 +1,27 @@
+"""
+Code for training hidden Markov models using the EM algorithm.
+
+Training this model takes about the time it takes to boil a pot of pasta.
+The trained models are about 15% better than a plain Markov model.
+
+A representative sample from a trained model looks like this:
+
+ ... Ingh ceptte thery prelve I a hice onl hary hakessemine therstl
+ it thas coug thind coms, ther we whansh set rines suraticapra pewn
+ sust thas allalle ting anghtt? I fom on mant inscor mur, limb that
+ dents thin, a peoug. The on wition butmamp an of counther predist
+ they as mok us alardliblersen thas mem on of sty hasoch hilly hictals
+ hexcan ho muf anion was. Whe Wertffe domel plete, of tunouinfath. Ilkd
+ busiof ther ang on. Mach leth trict ing of dicaly bust dable empl aise
+ spruly of mon. subered a proull padie hen! af wher dot ingh ang bethe
+ my shontrar offusher the wist NV Britord, oned dlies thoore rok his
+ pusoffach to by innot be witiofferpron earder mider and wat laings,
+ any besdinaked ind has sundzandeve comed was was becian ous cores And
+ as had galich by coulatte. ...
+
+which is not English, but also not not English.
+"""
+
 import numpy as np
 import re
 
