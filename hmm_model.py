@@ -1,177 +1,225 @@
-"""
-This module contains code for training and using Hidden Markov model.
-"""
-
 import numpy as np
 import re
 
 
-def sample(trans, emits, length=1000, context=None):
-    """ Sample signal path given transition and emission params. """
+nhidden = 120
+nsignals = 128
+chunklength = 10000
+chunks_per_update = 10
 
+
+def draw_sample(trans, emits, length):
+    """ Draw a sample from a hidden Markov model. """
+    
     nhidden, nsignals = emits.shape
+    assert trans.shape[0] == trans.shape[1] == nhidden
 
-    if context:
-        # assume we start the sample immediately after the context:
-        forward = compute_forward(context, trans, emits)
-        backward = compute_backward(context, trans, emits)
-        distributions = forward * backward
-        distributions /= np.sum(distributions, axis=1, keepdims=True)
-        initial = distributions[-1, :]
-    else:
-        # assume we start the sample after a long unobserved sequence:
-        initial = np.ones(nhidden) / nhidden
-        for _ in range(100):
-            initial = initial @ trans
+    dist = equilibrium(trans)
+    newh = np.random.choice(nhidden, p=dist)
+    hiddens = [newh]
+    for _ in range(length - 1):
+        oldh = hiddens[-1]
+        newh = np.random.choice(nhidden, p=trans[oldh, :])
+        hiddens.append(newh)
+
+    observations = [np.random.choice(nsignals, p=emits[h]) for h in hiddens]
     
-    idx = np.random.choice(nhidden, p=initial)
-    z = [idx]
-    while len(z) < length:
-        olddist = np.zeros(nhidden)
-        olddist[idx] = 1.0
-        newdist = olddist @ trans
-        idx = np.random.choice(nhidden, p=newdist)
-        z.append(idx)
-    z = np.array(z)
-
-    x = []
-    for idx in z:
-        hdist = np.zeros(nhidden)
-        hdist[idx] = 1.0
-        edist = hdist @ emits
-        jdx = np.random.choice(nsignals, p=edist)
-        x.append(jdx)
-    x = np.array(x)
-
-    return x  # we only return the observations, not the hidden states
+    return observations, hiddens
 
 
-def compute_forward(x, trans, emits):
-    """ Compute the priors given all (strictly) past evidence. """
+def equilibrium(trans):
+    """ Find a stochastic vector `v` such that `v @ trans == v`. """
+    assert np.allclose(np.sum(trans, axis=1), 1.0)
+    values, vectors = np.linalg.eig(trans.T)
+    unit_idx = np.argmin(np.abs(values - 1.0))
+    stationary = np.real(vectors[:, unit_idx])
+    stationary /= np.sum(stationary)
+    assert np.allclose(stationary @ trans, stationary)
+    return stationary
 
-    length = len(x)
-    nhidden, _ = emits.shape
-    forward = np.ones(shape=(length, nhidden)) / nhidden
 
-    # we assume that we start in a stable state given `trans`:
-    prev = np.ones(nhidden) / nhidden
-    for _ in range(100):
-        prev = prev @ trans
+def monogram_probs(trans, emits):
+    """ Compute the output distribution in the model's steady state. """
+    return equilibrium(trans) @ emits
 
-    # then move forward, taking each observation into account:
-    for t in range(length):
-        forward[t, :] = prev @ trans
-        assert np.isclose(forward[t, :].sum(), 1.0)
-        # take the evidence into accout:
-        prev = forward[t, :] * emits[:, x[t]]
-        if np.allclose(prev, 0.0):
-            prev = 1.0
-        prev /= prev.sum()
+
+def bigram_probs(trans, emits):
+    """ Compute the _pair_ distribution in the model's steady state.
     
-    return forward
+    The probabilities come in a table of shape `[nsignals, nsignals]`.
+    The entry at `(i, j)` contains the probability of observing the
+    character pair `(X1 = i, X2 = j)`.
+    """
+    hdist = equilibrium(trans)          # P(Z1 = i), shape (K,)
+    hhdist = hdist[:, None] * trans     # P(Z1 = i, Z2 = j), shape (K, K)
+    hedist = hhdist @ emits             # P(Z1 = i, X2 = t), shape (K, S)
+    eedist = (hedist.T @ emits).T       # P(X1 = s, X2 = t), shape (S, S)
+    return eedist
 
 
-def compute_backward(x, trans, emits):
-    """ Compute relative likelihoods of current and future obs. """
-
-    length = len(x)
-    nhidden, _ = emits.shape
-    backward = np.ones(shape=(length, nhidden))
-
-    # we start with every state having nothing speaking against it:
-    curr = np.ones(nhidden)
-
-    # we then move backwards, computing the relative
-    for t in reversed(range(length)):
-        curr = curr @ trans.T
-        curr *= emits[:, x[t]]
-        if np.allclose(curr, 0.0):
-            curr[:] = 1.0
-        curr /= curr.sum()
-        backward[t, :] = curr
-
-    return backward
+def convert_text_to_array_of_integers(text, ord_cutoff=128):
+    """ Remove exotic characters and certain types of whitespace. """
+    text = re.sub("\s+", " ", text)  # replace all whitespace by space
+    ords = [ord(char) for char in text.strip() if ord(char) < ord_cutoff]
+    return np.array(ords)
 
 
-def optimize_parameters(x, distributions):
-    """ Given hidden-state distributions, choose best parameters. """
-
-    length, nhidden = distributions.shape
-
-    print("Optimizing emission probs . . .")
-    emits = np.zeros((nhidden, nsignals))
-    for t in range(length):
-        emits[:, x[t]] += distributions[t, :]
-    emits += 0.1 / nsignals  # virtual observations
-    emits /= emits.sum(axis=1, keepdims=True)
-
-    print("Optimizing transition probs . . .")
-    oldps = distributions[:-1, :, None]
-    newps = distributions[1:, None, :]
-    trans = np.sum(oldps * newps, axis=0)
-    trans += 0.1 / nhidden  # virtual observations
-    trans /= trans.sum(axis=1, keepdims=True)
-
-    print("Done optimizing parameters.\n")
-    return emits, trans
+def compute_kullback_divergece(p, q):
+    """ Compute the KL divergence from a stochastic array `p` to `q`. """
+    P = p[p > 0]
+    Q = q[p > 0]
+    return np.mean(P * np.log2(P / Q))
 
 
-def compute_perplexity(x, distributions, emits):
-    """ Compute average negative log_2 emission likelihood of x. """
-
-    conditionals = distributions @ emits
-    indices = range(len(x))
-    likelihoods = conditionals[indices, x]
-
-    return np.mean(-np.log2(likelihoods))
-
-
-# nhidden = 15
-# nsignals = 128
-# truetrans = np.random.dirichlet(np.ones(nhidden), size=nhidden)
-# trueemits = np.random.dirichlet(np.ones(nsignals), size=nhidden)
-# x = sample(truetrans, trueemits)
+def compute_monogram_frequencies(integers, nsignals):
+    """ Compile relative frequencies of all integers in `range(nsignals)`. """
+    assert np.all(integers < nsignals)
+    freqs = np.zeros(nsignals)
+    values, counts = np.unique(integers, return_counts=True)
+    freqs[values] += counts / np.sum(counts)
+    return freqs
 
 
-if __name__ == "__main__":
+def compute_digram_frequencies(integers, nsignals):
+    """ Compile digram freqencies of consecutive integers the sample. """
+    freqs = np.zeros((nsignals, nsignals))
+    for i, j in zip(integers[:-1], integers[1:]):
+        freqs[i, j] += 1
+    freqs /= np.sum(freqs)
+    return freqs
 
-    with open("long_text.txt") as source:
-        text = source.read()
-        text = re.sub("\s+", " ", text)  # replace all whitespace by space
-        # text = re.sub("\n(?!\n)", " ", text)  # un-break running text
-        allx = np.array([ord(char) for char in text if ord(char) < 128])
 
-    nhidden = 150
-    nsignals = 128
+def compute_conditional_entropy(pair_probabilities):
+    """ Compute the average negative log-probability of a Markov model. """
+    margin = np.sum(pair_probabilities, axis=1)
+    baseline = margin[:, None] * margin[None, :]
+    baseline += 1e-5
+    joints = pair_probabilities + 1e-5*baseline
+    joints /= np.sum(joints)
+    conds = joints / np.sum(joints, axis=1, keepdims=True)
+    return (-1) * np.sum(freqs2 * np.log2(conds))
 
-    # initial parameter guesses:
-    trans = np.random.dirichlet(np.ones(nhidden), size=nhidden)
-    emits = np.random.dirichlet(np.ones(nsignals), size=nhidden)
 
-    # split data up into manageable chunks; we won't split the data
-    # up into train and test sets, since each chunk will be visited
-    # only once, and we evaluate the loss on that chunk _before_ it
-    # has a chance of having an influence on the parameter values.
-    chunklength = 20000
-    nchunks = len(allx) // chunklength
-    fences = chunklength * np.arange(1, nchunks)
-    chunks = np.split(allx, fences)
-    np.random.shuffle(chunks)  # shuffle order, **in place**
+print("Loading text . . .")
+with open("long_text.txt") as source:
+    raw = source.read()
+    observation = convert_text_to_array_of_integers(raw, nsignals)
+print("Done; the text contains %s characters." % len(observation))
+print("")
 
-    for stepidx, x in enumerate(chunks):
-        print("--- Step number %s / %s ---\n" % (stepidx + 1, nchunks))
-        print("Computing hidden-state distributions . . .")
-        forward = compute_forward(x, trans, emits)
-        backward = compute_backward(x, trans, emits)
-        distributions = forward * backward
-        distributions /= np.sum(distributions, axis=1, keepdims=True)
-        trainloss = compute_perplexity(x, forward, emits)
-        print("train loss = %.2f\n" % (trainloss,))
-        emits, trans = optimize_parameters(x, distributions)
-        np.savez("hmmparams.npz", emits=emits, trans=trans)
+# Compute the empirical frequencies, so that we
+# can compare with a Markov model as a baseline:
+freqs1 = compute_monogram_frequencies(observation, nsignals)
+freqs2 = compute_digram_frequencies(observation, nsignals)
+entropy = compute_conditional_entropy(freqs2)
+meanprob = 0.5 ** entropy
+print("Markov model baseline:")
+print("H(X_t | X_{t - 1}) = %.5f = -log(%.5f)." % (entropy, meanprob))
+print("")
 
-        context = [ord(letter) for letter in "CHAPTER I. "]
-        codes = sample(trans, emits, context=context)
-        letters = (chr(c) for c in codes)
-        print("".join(letters))
-        print()
+# Divide the corpus up into smaller chunks:
+nchunks = len(observation) // chunklength
+fences = chunklength * np.arange(1, nchunks)
+chunks = np.split(observation, fences)
+np.random.shuffle(chunks)  # shuffle order, **in place**
+bounds = range(0, len(chunks), chunks_per_update)
+subsets = [chunks[b : b + chunks_per_update] for b in bounds]
+
+# initialize parameters:
+trans = np.random.dirichlet(np.ones(nhidden), size=nhidden)
+emits = np.random.dirichlet(np.ones(nsignals), size=nhidden)
+
+# compute fallback parameters used in the absense of data:
+fallback_trans = np.ones((nhidden, nhidden)) / nhidden
+fallback_emits = np.ones((nhidden, nsignals)) * freqs1
+
+# create accumulators that will contain the
+# stats required for the next parameter update:
+transition_counter = np.zeros_like(trans)
+emission_counter = np.zeros_like(emits)
+recent_losses = []
+
+for stepidx, subset in enumerate(subsets):
+
+    for snippet in subset:
+
+        snippet_length = len(snippet)
+        likelihoods = emits[:, snippet].T
+
+        exclusive_past = np.zeros((snippet_length, nhidden))
+        # inclusive_past = np.zeros((snippet_length, nhidden))
+        curr = np.ones(nhidden) / nhidden
+        for t, like in enumerate(likelihoods):
+            exclusive_past[t, :] = curr
+            curr *= like
+            curr /= curr.sum()
+            # inclusive_past[t, :] = curr
+            curr = curr @ trans
+
+        # exclusive_future = np.ones((snippet_length, nhidden))
+        inclusive_future = np.ones((snippet_length, nhidden))
+        curr = equilibrium(trans)
+        for t in reversed(range(len(snippet))):
+            # exclusive_future[t, :] = curr
+            like = likelihoods[t, :]
+            curr *= like
+            curr /= curr.sum()  # destroy true likelihood, but good for stability
+            inclusive_future[t, :] = curr
+            curr = curr @ trans.T
+
+        inclusive_past = exclusive_past * likelihoods
+        inclusive_past /= np.sum(inclusive_past, axis=1, keepdims=True)
+
+        kl1 = compute_kullback_divergece(freqs1, monogram_probs(trans, emits))
+        kl2 = compute_kullback_divergece(freqs2, bigram_probs(trans, emits))
+        marginals = exclusive_past[:, None, :] @ likelihoods[:, :, None]
+        marginals = np.squeeze(marginals, axis=(1, 2))
+        loss = np.mean(-np.log2(marginals))
+        recent_losses.append(loss)
+        lines = [
+            ("Step %s --" % stepidx).rjust(12),
+            "loss: %.5f = -log_2(%.5f);" % (loss, 0.5 ** loss),
+            "KL to Markov model: %.5f (monogram), %.5f (digram)" % (kl1, kl2)
+        ]
+        print(" ".join(lines))
+
+        posteriors = exclusive_past * inclusive_future
+        for t, xt in enumerate(snippet):
+            emission_counter[:, xt] += posteriors[t, :]    
+
+        # print("--> half done -->")
+        joint = inclusive_past[:-1, :, None] * inclusive_future[1:, None, :]
+        joint *= trans
+        joint /= np.sum(joint, axis=(1, 2), keepdims=True)
+        transition_counter += np.sum(joint, axis=0)
+        # print("--> Done updating event counters.\n\n")
+
+    new_emits = emission_counter / np.sum(emission_counter, axis=1, keepdims=True)
+    new_trans = transition_counter / np.sum(transition_counter, axis=1, keepdims=True)
+    emission_counter *= 0
+    transition_counter *= 0
+
+    # If we were clever about this, we would keep track of how much the
+    # parameters and therefore the conditional distributions had changed
+    # since last parameter update, and this would give us information
+    # about how seriously we could take evidence collected under the old
+    # posterior distribution; once we started converging to a local max
+    # of the model, this would lead to a behavior where evidence was
+    # simply accumulated across epochs, rather than erased by each update.
+    # But as it is, we forget old evidence exponentially fast.
+    weights = np.array([1.0, 1e-2, 1e-5])  # new, old, fallback
+    weights /= weights.sum()
+    trans = weights[0]*transition_counter + weights[1]*trans + weights[2]*fallback_trans
+    emits = weights[0]*emission_counter + weights[1]*emits + weights[2]*fallback_emits
+
+    np.savez("hmmparams.npz", emits=emits, trans=trans)
+
+    print("")
+    print("Mean of recent losses: %.5f.\n" % np.mean(recent_losses))
+    recent_losses = []
+
+    sample, _ = draw_sample(trans, emits, 1000)
+    letters = [chr(xt) for xt in sample if xt < 128]
+    print("".join(c for c in letters if c.isprintable()))
+    print("")
+
