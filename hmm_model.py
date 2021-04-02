@@ -29,7 +29,7 @@ import re
 nhidden = 120
 nsignals = 128
 chunklength = 10000
-chunks_per_update = 10
+chunks_per_update = 5
 
 
 def draw_sample(trans, emits, length):
@@ -218,9 +218,12 @@ for stepidx, subset in enumerate(subsets):
         transition_counter += np.sum(joint, axis=0)
         # print("--> Done updating event counters.\n\n")
 
-    new_emits = emission_counter / np.sum(emission_counter, axis=1, keepdims=True)
-    new_trans = transition_counter / np.sum(transition_counter, axis=1, keepdims=True)
+    new_emits = emission_counter.copy()
+    new_emits /= np.sum(new_emits, axis=1, keepdims=True)
     emission_counter *= 0
+
+    new_trans = transition_counter.copy()
+    new_trans /= np.sum(new_trans, axis=1, keepdims=True)
     transition_counter *= 0
 
     # If we were clever about this, we would keep track of how much the
@@ -233,8 +236,8 @@ for stepidx, subset in enumerate(subsets):
     # But as it is, we forget old evidence exponentially fast.
     weights = np.array([1.0, 1e-2, 1e-5])  # new, old, fallback
     weights /= weights.sum()
-    trans = weights[0]*transition_counter + weights[1]*trans + weights[2]*fallback_trans
-    emits = weights[0]*emission_counter + weights[1]*emits + weights[2]*fallback_emits
+    trans = weights[0]*new_trans + weights[1]*trans + weights[2]*fallback_trans
+    emits = weights[0]*new_emits + weights[1]*emits + weights[2]*fallback_emits
 
     np.savez("hmmparams.npz", emits=emits, trans=trans)
 
