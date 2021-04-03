@@ -426,7 +426,7 @@ class Grammar(dict):
 
         return outside
 
-    def compute_transition_probabilities(self, inside, outside):
+    def sum_transition_probabilities(self, inside, outside):
         """ Sum up joint expansion probabilities given the sentence.
         
         This returns a matrix of shape `(N, N, N)`, where `N` is the
@@ -468,7 +468,7 @@ class Grammar(dict):
 
         return joints
     
-    def compute_emission_probabilities(self, sentence, outside):
+    def sum_emission_probabilities(self, sentence, outside):
 
         size_alphabet = 128  # hardcoded for now
 
@@ -540,8 +540,8 @@ if __name__ == "__main__":
     num_nonterminals_in_tree = 2*len(sentence) - 1
     assert np.isclose(posteriors[0, -1].sum(), 1.0)
     assert np.isclose(posteriors.sum(), num_nonterminals_in_tree)
-    transprobs = grammar.compute_transition_probabilities(inside, outside)
-    emitsprobs = grammar.compute_emission_probabilities(sentence, outside)
+    transprobs = grammar.sum_transition_probabilities(inside, outside)
+    emitsprobs = grammar.sum_emission_probabilities(sentence, outside)
 
     most_probable_nodes = np.argmax(posteriors, axis=2)
     rows, cols = np.where(np.max(posteriors, axis=2) == 0)
@@ -598,12 +598,12 @@ if __name__ == "__main__":
         
         # inside = grammar.compute_inside_probabilities(sentence)
         # outside = grammar.compute_outside_probabilities(inside, initial=0)
-        # trans_acc += grammar.compute_transition_probabilities(inside, outside)
-        # emits_acc += grammar.compute_emission_probabilities(sentence, outside)
+        # trans_acc += grammar.sum_transition_probabilities(inside, outside)
+        # emits_acc += grammar.sum_emission_probabilities(sentence, outside)
         inside = estimated_grammar.compute_inside_probabilities(sentence)
         outside = estimated_grammar.compute_outside_probabilities(inside, initial=0)
-        trans_acc += estimated_grammar.compute_transition_probabilities(inside, outside)
-        emits_acc += estimated_grammar.compute_emission_probabilities(sentence, outside)
+        trans_acc += estimated_grammar.sum_transition_probabilities(inside, outside)
+        emits_acc += estimated_grammar.sum_emission_probabilities(sentence, outside)
 
     print("\n")
 
