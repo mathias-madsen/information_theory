@@ -6,18 +6,25 @@ The trained models are about 15% better than a plain Markov model.
 
 A representative sample from a trained model looks like this:
 
- ... Ingh ceptte thery prelve I a hice onl hary hakessemine therstl
- it thas coug thind coms, ther we whansh set rines suraticapra pewn
- sust thas allalle ting anghtt? I fom on mant inscor mur, limb that
- dents thin, a peoug. The on wition butmamp an of counther predist
- they as mok us alardliblersen thas mem on of sty hasoch hilly hictals
- hexcan ho muf anion was. Whe Wertffe domel plete, of tunouinfath. Ilkd
- busiof ther ang on. Mach leth trict ing of dicaly bust dable empl aise
- spruly of mon. subered a proull padie hen! af wher dot ingh ang bethe
- my shontrar offusher the wist NV Britord, oned dlies thoore rok his
- pusoffach to by innot be witiofferpron earder mider and wat laings,
- any besdinaked ind has sundzandeve comed was was becian ous cores And
- as had galich by coulatte. ...
+    abibly the difiadlity. O carwe argger, ane and forms,
+    difeniturders an and of low water, I cus cames won the
+    _Nuily rogeory, our it got indaiffer gedrecks, contuse
+    and hated, jirdled nectiouc Ratied the wounded the cour,
+    ardg-ty in! he word to the fered hat at If and war.
+    Fargrosith therillot kle in sutit whith sitm thoussist
+    sure chiout all to is duircher cengronce. Rulaid the
+    fuse hork and thany she roviver. WDuted the yon ext
+    Rog-ter. I whemis, to ocher, thouch cunctily the propany
+    wonall was: as plim to ude of buld expect acuBictith
+    Mrothessed and, it had Froth that sting Yong and, this
+    saves, scalld pered on 0. Rudle scolole sacullld in and
+    nunges you the plet atth ou 0. I werst fiad-tither, are
+    eil Ax Ruagred he distrivent com som the cess cop blic
+    matilly dies me insuth ong herwube asorked honfort. Roo;
+    _I rometht of to bir eriffut fonagrondided found intrirth,
+    ever Roch of an us of the sir, on thavation toor suturdly
+    to malld hin, wion on youke.0.-te duen the mose
+    whitunsurtati
 
 which is not English, but also not not English.
 """
