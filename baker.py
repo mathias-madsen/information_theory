@@ -127,23 +127,32 @@ def conditionally_sample_tree(singles, grammar, sentence, start=None, stop=None,
 
 class Grammar(dict):
 
-    def __init__(self, rulebooks):
+    def __init__(self, rulebooks, size_alphabet=128):
 
         # Add the given rules to the internal library:
         self.update(rulebooks)
 
         # compile a transition matrix from the rules:
         self.transitions = np.zeros(3 * [len(self)])
+        self.emissions = np.zeros([len(self), size_alphabet])
+
         for k, rulebook in self.items():
             for rule, probability in rulebook.items():
                 if type(rule) == str:
-                    # at this point, we still allow the space of terminals to
-                    # be infinite, so we don't compile a matrix of emission
-                    # probabilities, but instead use the grammar rules directly
-                    continue
+                    # if we used dicts here, we could allow the
+                    # alphabet to be infinite, but at the cost
+                    # of having for parameterize the fallback
+                    # distribution.
+                    idx = ord(rule)
+                    assert idx < size_alphabet
+                    self.emissions[k, idx] += probability
                 else:
                     i, j = rule
                     self.transitions[k, i, j] += probability
+
+        tsum = self.transitions.sum(axis=(1, 2))
+        esum = self.emissions.sum(axis=1)
+        assert np.allclose(tsum + esum, 1.0)
 
     def sample(self, root=0):
         """ Sample a random tree below a given nonterminal `root`. """
@@ -263,34 +272,54 @@ class Grammar(dict):
         return outside
 
     def compute_transition_probabilities(self, inside, outside):
-        """ Compute conditional prob. of expansions given sentence.
+        """ Sum up joint expansion probabilities given the sentence.
         
-        This returns a matrix of shape `(L, L, L)`, where `L` is the
-        number of nonterminal symbols in the grammar. The entry at
-        (k, i, j) is the _conditional_ probability that the nonterminal
-        k will expand as (i, j) given that it occurs and given the
-        characters in the sentence (and, of course, given the grammar).
+        This returns a matrix of shape `(N, N, N)`, where `N` is the
+        number of nonterminal symbols in the grammar.
+        
+        The entry at (k, i, j) contains the probability that the
+        nonterminal k was expanded into the pair of nonterminals (i, j)
+        somewhere in the syntatic tree of this sentence.
         """
 
         len_sentence, _, num_nonterminals = inside.shape
         joints = np.zeros(3 * [num_nonterminals])
         for start in range(len_sentence):
             for stop in range(start + 2, len_sentence + 1):
-                pk = outside[start, stop - 1, :][:, None, None]
+                prior = outside[start, stop - 1, :][:, None, None]
+                conds = np.zeros_like(self.transitions)
                 for split in range(start + 1, stop):
                     qi = inside[start, split - 1, :][None, :, None]
                     qj = inside[split, stop - 1, :][None, None, :]
-                    joints += (pk * qi * qj * self.transitions)
+                    conds = qi * qj * self.transitions
+                norms = np.sum(conds, axis=(1, 2))
+                conds[norms > 0,] /= norms[norms > 0, None, None]
+                joints += (prior * conds)
 
-        sums = np.sum(joints, axis=(1, 2))
-        posidx, = np.where(sums > 0)
-        joints[posidx, :, :] /= sums[posidx, None, None]
+        # sums = np.sum(joints, axis=(1, 2))
+        # posidx, = np.where(sums > 0)
+        # joints[posidx, :, :] /= sums[posidx, None, None]
 
         return joints
     
-    def compute_emission_probabilities(self, inside):
+    def compute_emission_probabilities(self, sentence, outside):
 
-        pass
+        size_alphabet = 128
+
+        len_sentence = len(sentence)
+        _, _, num_nonterminals = outside.shape
+        probs = np.zeros((num_nonterminals, size_alphabet))
+
+        for start, character in enumerate(sentence):
+            idx = ord(character)
+            priors = outside[start, start, :]  # shape (N,)
+            likelihoods = self.emissions[:, idx]  # shape (N,)
+            posteriors = priors * likelihoods
+            if np.any(posteriors > 0):
+                posteriors /= posteriors.sum()
+            probs[:, idx] += posteriors
+        
+        return probs
 
 
 codex = {
@@ -331,15 +360,31 @@ if __name__ == "__main__":
     tree = grammar.sample(root=0)
     sentence = tree.flatten()
     print("Sentence: %r\n" % sentence)
-    print("Actual tree:")
+    print("Actual tree:\n")
     tree.pprint()
-    print("(probability %.5f).\n" % np.exp(grammar.logprob(tree)))
+    print("log(probability) = %.5f.\n" % grammar.logprob(tree))
 
+    # parse the sentence:
     inside = grammar.compute_inside_probabilities(sentence)
-    assert inside[0, len(sentence) - 1, 0] > 0  # root is always 0
+    assert inside[0, len(sentence) - 1, 0] > 0  # P(root = N_0) = 1
     initial = np.array([1.] + (len(grammar) - 1)*[0.])
     outside = grammar.compute_outside_probabilities(inside, initial=initial)
+    # Compute the node-specific occupancy probabilities:
+    posteriors = inside * outside
+    posteriors /= posteriors[0, -1, :].sum()
+    num_nonterminals_in_tree = 2*len(sentence) - 1
+    assert np.isclose(posteriors[0, -1].sum(), 1.0)
+    assert np.isclose(posteriors.sum(), num_nonterminals_in_tree)
     transprobs = grammar.compute_transition_probabilities(inside, outside)
+    emitsprobs = grammar.compute_emission_probabilities(sentence, outside)
+
+    most_probable_nodes = np.argmax(posteriors, axis=2)
+    rows, cols = np.where(np.max(posteriors, axis=2) == 0)
+    most_probable_nodes[rows, cols] = -1
+    print("Actual node matrix:\n%s\n" % tree.nodematrix())
+    print("Most probable nodes:\n%s\n" % most_probable_nodes)
+    print("Actual occupancy matrix:\n%s\n" % (tree.nodematrix() != -1).astype(float))
+    print("Most probable occupancy:\n%s\n" % posteriors.sum(axis=2).round(3))
 
     print("Actually occurred transitions:")
     transitions = defaultdict(int)
@@ -350,21 +395,33 @@ if __name__ == "__main__":
             left, right = parent
             transitions[parent.head, left.head, right.head] += 1
             subtrees.extend([left, right])
-    for trans in transitions:
-        print(trans, transitions[trans])
+    for (k, i, j), count in transitions.items():
+        print("%s --> (%s, %s): %s" % (k, i, j, count))
     print()
 
-    print("A posteriori probable transitions:")
-    for triple in zip(*np.where(transprobs)):
-        print(triple, transprobs[triple])
+    print("Transition probabilities:")
+    for (k, i, j) in zip(*np.where(transprobs)):
+        print("%s --> (%s, %s): %s" % (k, i, j, transprobs[k, i, j]))
     print()
 
-    # print("Most probable nodes given characters below:")
-    # print(np.argmax(inside, axis=2))
-    # print()
-    # print("Most probable nodes given all characters _not_ below:")
-    # print(np.argmax(outside, axis=2))
-    # print()
-    # print("Actual node heads:")
-    # print(tree.nodematrix())
-    # print()
+    print("Actually occurred emissions:")
+    emissions = defaultdict(int)
+    subtrees = [tree]
+    while subtrees:
+        parent = subtrees.pop(0)
+        if len(parent) == 1:
+            idx = ord(parent[0])
+            emissions[parent.head, idx] += 1
+        else:
+            subtrees.extend(parent)
+    for ((i, j), count) in emissions.items():
+        print("%s --> %r: %s" % (i, chr(j), count))
+    print("")
+
+    print("Emission probabilities:")
+    for idx in range(128):
+        post = emitsprobs[:, idx]
+        for k, prob in enumerate(post):
+            if prob > 0:
+                print("%s --> %r: %s" % (k, chr(idx), prob))
+    print()
