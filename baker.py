@@ -48,6 +48,45 @@ class Tree(list):
                 branch.pprint(depth=depth + 1, indent=indent)
         if depth == 0:
             print("")  # empty line at the very end
+    
+    def iter_transitions(self):
+        """ Yield every branching triple k --> (i, j) in the tree. """
+
+        if len(self) == 2:
+            yield self.head, self[0].head, self[1].head
+            for triple in self[0].iter_transitions():
+                yield triple
+            for triple in self[1].iter_transitions():
+                yield triple
+    
+    def transition_counts(self):
+        """ Compile a dict of the frequency of each branching triple. """
+
+        counts = defaultdict(int)
+        for triple in self.iter_transitions():
+            counts[triple] += 1
+        
+        return dict(counts)
+    
+    def iter_emissions(self):
+        """ Yield every (nonterminal, terminal) emission pair. """
+
+        if len(self) == 1:
+            yield self.head, self[0]
+        else:
+            for pair in self[0].iter_emissions():
+                yield pair
+            for pair in self[1].iter_emissions():
+                yield pair
+    
+    def emission_counts(self):
+        """ Compile a dict of the frequency of each emission pair. """
+
+        counts = defaultdict(int)
+        for pair in self.iter_emissions():
+            counts[pair] += 1
+        
+        return dict(counts)
 
     def spandict(self):
         """ Convert the tree into a dict of head spans. """
@@ -387,15 +426,7 @@ if __name__ == "__main__":
     print("Most probable occupancy:\n%s\n" % posteriors.sum(axis=2).round(3))
 
     print("Actually occurred transitions:")
-    transitions = defaultdict(int)
-    subtrees = [tree]
-    while subtrees:
-        parent = subtrees.pop(0)
-        if len(parent) > 1:
-            left, right = parent
-            transitions[parent.head, left.head, right.head] += 1
-            subtrees.extend([left, right])
-    for (k, i, j), count in transitions.items():
+    for (k, i, j), count in tree.transition_counts().items():
         print("%s --> (%s, %s): %s" % (k, i, j, count))
     print()
 
@@ -405,17 +436,8 @@ if __name__ == "__main__":
     print()
 
     print("Actually occurred emissions:")
-    emissions = defaultdict(int)
-    subtrees = [tree]
-    while subtrees:
-        parent = subtrees.pop(0)
-        if len(parent) == 1:
-            idx = ord(parent[0])
-            emissions[parent.head, idx] += 1
-        else:
-            subtrees.extend(parent)
-    for ((i, j), count) in emissions.items():
-        print("%s --> %r: %s" % (i, chr(j), count))
+    for ((i, c), count) in tree.emission_counts().items():
+        print("%s --> %r: %s" % (i, c, count))
     print("")
 
     print("Emission probabilities:")
