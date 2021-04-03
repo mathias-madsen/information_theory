@@ -369,9 +369,8 @@ class Grammar(dict):
     
     def compute_emission_probabilities(self, sentence, outside):
 
-        size_alphabet = 128
+        size_alphabet = 128  # hardcoded for now
 
-        len_sentence = len(sentence)
         _, _, num_nonterminals = outside.shape
         probs = np.zeros((num_nonterminals, size_alphabet))
 
