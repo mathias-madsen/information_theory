@@ -8,7 +8,7 @@ expansion of a particular nonterminal symbol.
 
 from collections import defaultdict
 from collections import OrderedDict
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 import numpy as np
 
 
@@ -111,69 +111,101 @@ class Tree(list):
         return np.array(matrix)
 
 
-def extract_most_likely_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
-    """ Compute the most likely parse of a sentence. """
-    if start is None:
-        start, stop = 0, len(sentence)
-    if stop == start + 1:
-        return Tree(root, [sentence[start]])
-    options = dict()
-    for rule, ruleprob in grammar[root].items():
-        if type(rule) == str:
-            continue  # a terminal can't match >= 2 characters
-        Nleft, Nright = rule
-        for mid in range(start + 1, stop):
-            Pleft = singles[start, mid][Nleft]
-            Pright = singles[mid, stop][Nright]
-            options[Nleft, Nright, mid] = ruleprob * Pleft * Pright
-    assert any(options.values()), "Error: no parse of %s" % options
-    Nleft, Nright, mid = max(options, key=lambda k: options[k])
-    assert options[Nleft, Nright, mid] > 0
-    Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
-    Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
-    assert Nleft == Tleft.head
-    assert Nright == Tright.head
-    return Tree(root, [Tleft, Tright])
+# def extract_most_likely_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
+#     """ Compute the most likely parse of a sentence. """
+#     if start is None:
+#         start, stop = 0, len(sentence)
+#     if stop == start + 1:
+#         return Tree(root, [sentence[start]])
+#     options = dict()
+#     for rule, ruleprob in grammar[root].items():
+#         if type(rule) == str:
+#             continue  # a terminal can't match >= 2 characters
+#         Nleft, Nright = rule
+#         for mid in range(start + 1, stop):
+#             Pleft = singles[start, mid][Nleft]
+#             Pright = singles[mid, stop][Nright]
+#             options[Nleft, Nright, mid] = ruleprob * Pleft * Pright
+#     assert any(options.values()), "Error: no parse of %s" % options
+#     Nleft, Nright, mid = max(options, key=lambda k: options[k])
+#     assert options[Nleft, Nright, mid] > 0
+#     Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
+#     Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
+#     assert Nleft == Tleft.head
+#     assert Nright == Tright.head
+#     return Tree(root, [Tleft, Tright])
 
 
-def conditionally_sample_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
-    """ Sample a tree that consistent with the given sentence. """
-    # in the base case, we cover the whole sentence:
-    if start is None:
-        start, stop = 0, len(sentence)
-    if stop == start + 1:
-        return Tree(root, [sentence[start]])
-    # find most probable bifurcation of that node:
-    splits = []
-    splitprobs = []
-    for rule, ruleprob in grammar[root].items():
-        if type(rule) == str:
-            continue  # a terminal can't match >= 2 characters
-        Nleft, Nright = rule
-        for mid in range(start + 1, stop):
-            Pleft = singles[start, mid][Nleft]
-            Pright = singles[mid, stop][Nright]
-            splits.append((Nleft, Nright, mid))
-            splitprobs.append(ruleprob * Pleft * Pright)
-    splitprobs = np.array(splitprobs) / sum(splitprobs)
-    assert any(splitprobs > 0), "Error: no possibilities in %s" % rule
-    index = np.random.choice(len(splits), p=splitprobs)
-    Nleft, Nright, mid = splits[index]
-    Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
-    Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
-    return Tree(root, [Tleft, Tright])
+# def conditionally_sample_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
+#     """ Sample a tree that consistent with the given sentence. """
+#     # in the base case, we cover the whole sentence:
+#     if start is None:
+#         start, stop = 0, len(sentence)
+#     if stop == start + 1:
+#         return Tree(root, [sentence[start]])
+#     # find most probable bifurcation of that node:
+#     splits = []
+#     splitprobs = []
+#     for rule, ruleprob in grammar[root].items():
+#         if type(rule) == str:
+#             continue  # a terminal can't match >= 2 characters
+#         Nleft, Nright = rule
+#         for mid in range(start + 1, stop):
+#             Pleft = singles[start, mid][Nleft]
+#             Pright = singles[mid, stop][Nright]
+#             splits.append((Nleft, Nright, mid))
+#             splitprobs.append(ruleprob * Pleft * Pright)
+#     splitprobs = np.array(splitprobs) / sum(splitprobs)
+#     assert any(splitprobs > 0), "Error: no possibilities in %s" % rule
+#     index = np.random.choice(len(splits), p=splitprobs)
+#     Nleft, Nright, mid = splits[index]
+#     Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
+#     Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
+#     return Tree(root, [Tleft, Tright])
 
 
 class Grammar(dict):
 
-    def __init__(self, rulebooks, size_alphabet=128):
+    def __init__(self, rulebooks=None, transitions=None, emissions=None, size_alphabet=128):
 
-        # Add the given rules to the internal library:
+        self.transitions = None
+        self.emissions = None
+
+        if rulebooks is not None:
+            self.update_from_rulebooks(rulebooks, size_alphabet)
+        elif transitions is not None and emissions is not None:
+            self.update_from_matrices(transitions, emissions)
+        else:
+            raise ValueError("Please provide either rulebooks or matrices.")
+    
+    def validate(self):
+        """ Check that all stochastic constraints are satisfied. """
+
+        # This check probably shouldn't live here, but we want to
+        # verify that all the rulebooks are in Chomsky normal form:
+        for nonterminal, rulebook in self.items():
+            for expansion in rulebook.keys():
+                branching = type(expansion) == tuple and len(expansion) == 2
+                closing = type(expansion) in [str, int]
+                assert branching or closing, (nonterminal, expansion)
+
+        for nonterminal, rulebook in self.items():
+            # note: `sum` can take iterables, `np.sum` cannot
+            probsum = sum(rulebook.values())
+            assert np.allclose(probsum, 1.0), (nonterminal, probsum)
+
+        tsums = self.transitions.sum(axis=(1, 2))
+        esums = self.emissions.sum(axis=1)
+        assert np.allclose(tsums + esums, 1.0), (tsums + esums)
+    
+    def update_from_rulebooks(self, rulebooks, size_alphabet=128):
+        """ Convert a dict of nonterminal rulebooks to matrix form. """
+
         self.update(rulebooks)
 
-        # compile a transition matrix from the rules:
-        self.transitions = np.zeros(3 * [len(self)])
-        self.emissions = np.zeros([len(self), size_alphabet])
+        num_nonterminals = len(rulebooks)
+        transitions = np.zeros(3 * [num_nonterminals])
+        emissions = np.zeros([num_nonterminals, size_alphabet])
 
         for k, rulebook in self.items():
             for rule, probability in rulebook.items():
@@ -183,15 +215,37 @@ class Grammar(dict):
                     # of having for parameterize the fallback
                     # distribution.
                     idx = ord(rule)
-                    assert idx < size_alphabet
-                    self.emissions[k, idx] += probability
+                    assert idx < size_alphabet, (idx, size_alphabet)
+                    emissions[k, idx] += probability
                 else:
                     i, j = rule
-                    self.transitions[k, i, j] += probability
+                    transitions[k, i, j] += probability
 
-        tsums = self.transitions.sum(axis=(1, 2))
-        esums = self.emissions.sum(axis=1)
-        assert np.allclose(tsums + esums, 1.0)
+        self.transitions = transitions
+        self.emissions = emissions
+        self.validate()
+    
+    def update_from_matrices(self, transitions, emissions):
+        """ Convert transition and emission matrices to rulebooks. """
+
+        self.transitions = transitions
+        self.emissions = emissions
+
+        rulebooks = dict()
+
+        for k, probij in enumerate(transitions):
+            rulebooks[k] = dict()
+            for i, probj in enumerate(probij):
+                for j, prob in enumerate(probj):
+                    rulebooks[k][i, j] = prob
+
+        for k, probc in enumerate(emissions):
+            for idx, prob in enumerate(probc):
+                character = chr(idx)
+                rulebooks[k][character] = prob
+        
+        self.update(rulebooks)
+        self.validate()
 
     def sample(self, root=0):
         """ Sample a random tree below a given nonterminal `root`. """
@@ -345,7 +399,7 @@ class Grammar(dict):
         rootprobs = inside[0, -1, :] * outside[0, -1, :]
         # probability that the sentence has _any_ root at all:
         probability_of_sentence = np.sum(rootprobs)
-        assert probability_of_sentence > 0
+        assert probability_of_sentence > 0, probability_of_sentence
         # for each slot in the tree matrix, the conditional probability
         # that this slot is occupied by a given type of nonterminal,
         # given that the sentence occurred:
@@ -363,7 +417,7 @@ class Grammar(dict):
                     likelihood += qi * qj * self.transitions
                 joints += priors[:, None, None] * likelihood
 
-        assert np.isclose(joints.sum(), len(sentence) - 1)
+        assert np.isclose(joints.sum(), len(sentence) - 1), joints.sum()
 
         return joints
     
@@ -473,44 +527,51 @@ if __name__ == "__main__":
                 print("%s --> %r: %s" % (k, chr(idx), prob))
     print()
 
-    new_transitions = grammar.transitions.copy()
-    new_emissions = grammar.emissions.copy()
+    N, S = grammar.emissions.shape
+    randtrans = 0.2 * np.random.gamma(1.0, size=(N, N, N))
+    randemits = 0.8 * np.random.gamma(1.0, size=(N, S))
+    norms = np.sum(randtrans, axis=(1, 2)) + np.sum(randemits, axis=1)
+    randtrans /= norms[:, None, None]
+    randemits /= norms[:, None]
+    estimated_grammar = Grammar(transitions=randtrans, emissions=randemits)
 
-    for _ in range(100):
+    trans_acc = np.zeros_like(grammar.transitions)
+    emits_acc = np.zeros_like(grammar.emissions)
+
+    for _ in range(300):
         print(".", end=" ", flush=True)
         tree = grammar.sample()
         sentence = tree.terminals
-        inside = grammar.compute_inside_probabilities(sentence)
-        outside = grammar.compute_outside_probabilities(inside, initial=0)
-        for tp in grammar.compute_transition_probabilities(inside, outside):
-            new_transitions += tp
-        for ep in  grammar.compute_emission_probabilities(sentence, outside):
-            new_emissions += ep
+        # true_tp = np.zeros(3 * [len(grammar)])
+        # for (k, i, j), p in tree.transition_counts().items():
+        #     true_tp[k, i, j] += p
+        # true_ep = np.zeros([len(grammar), 128])
+        # for (k, c), p in  tree.emission_counts().items():
+        #     true_ep[k, ord(c)] += p
+        
+        # inside = grammar.compute_inside_probabilities(sentence)
+        # outside = grammar.compute_outside_probabilities(inside, initial=0)
+        # trans_acc += grammar.compute_transition_probabilities(inside, outside)
+        # emits_acc += grammar.compute_emission_probabilities(sentence, outside)
+        inside = estimated_grammar.compute_inside_probabilities(sentence)
+        outside = estimated_grammar.compute_outside_probabilities(inside, initial=0)
+        trans_acc += estimated_grammar.compute_transition_probabilities(inside, outside)
+        emits_acc += estimated_grammar.compute_emission_probabilities(sentence, outside)
+
     print("\n")
 
-    # tsums = np.sum(new_transitions, axis=(1, 2))
-    # esums = np.sum(new_emissions, axis=1)
-    # norms = tsums + esums
-    # new_transitions /= norms[:, None, None]
-    # new_emissions /= norms[:, None]
-    # print(grammar.transitions)
-    # print(grammar.transitions.sum(axis=(1, 2)))
-    # print(grammar.emissions.sum(axis=(1,)))
-    # print()
-    # print(new_transitions.round(3))
-    # print(new_transitions.sum(axis=(1, 2)).round(3))
-    # print(new_emissions.sum(axis=(1,)).round(3))
-    # print()
+    tsums = np.sum(trans_acc, axis=(1, 2))
+    esums = np.sum(emits_acc, axis=1)
+    norms = tsums + esums
+    new_transitions = trans_acc / norms[:, None, None]
+    new_emissions = emits_acc / norms[:, None]
 
-    # rulebooks = {}
-    # for k, probij in enumerate(new_transitions):
-    #     rulebooks[k] = dict()
-    #     for i, probj in enumerate(probij):
-    #         for j, prob in enumerate(probj):
-    #             rulebooks[k][i, j] = prob
-    # for k, probc in enumerate(new_emissions):
-    #     for idx, prob in enumerate(probc):
-    #         character = chr(idx)
-    #         rulebooks[k][character] = prob
-    
-    # new_grammar = Grammar(rulebooks)
+    print(grammar.transitions)
+    print(grammar.transitions.sum(axis=(1, 2)))
+    print(grammar.emissions.sum(axis=(1,)))
+    print()
+    print(new_transitions.round(3))
+    print()
+    print(new_transitions.sum(axis=(1, 2)).round(2))
+    print(new_emissions.sum(axis=(1,)).round(2))
+    print()
