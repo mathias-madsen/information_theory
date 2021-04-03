@@ -189,9 +189,9 @@ class Grammar(dict):
                     i, j = rule
                     self.transitions[k, i, j] += probability
 
-        tsum = self.transitions.sum(axis=(1, 2))
-        esum = self.emissions.sum(axis=1)
-        assert np.allclose(tsum + esum, 1.0)
+        tsums = self.transitions.sum(axis=(1, 2))
+        esums = self.emissions.sum(axis=1)
+        assert np.allclose(tsums + esums, 1.0)
 
     def sample(self, root=0):
         """ Sample a random tree below a given nonterminal `root`. """
@@ -252,7 +252,7 @@ class Grammar(dict):
         expectations = vectors[:, idx.item()]
         expectations /= expectations[-1]  # normalize using terminal length
 
-        return expectations
+        return np.real(expectations)
 
     def compute_inside_probabilities(self, sentence):
         """ Compute the likelihood of each substring given each nonterminal. """
@@ -279,35 +279,50 @@ class Grammar(dict):
         return inside
 
     def compute_outside_probabilities(self, inside, initial=None):
+        """ Given letter-generation likelihoods, compute node probs.
+        
+        The result is an array of shape `[T, T, N]`, where `T` is the
+        length of the sentence and `N` is the number of nonterminals.
+
+        The entry at `(s, t, n)` contains the probability that the
+        grammar would generate the letters from `0` to `s` and from
+        `t` to `T`, as well as generate a node of type `n` at the top
+        of the subtree spanning the letters from `s` to `t`.
+        """
 
         len_sentence, _, num_nonterminals = inside.shape
         outside = np.zeros(2*[len_sentence] + [len(self)])
 
-        if initial is not None:  # we have not specified any starting nonterminal
+        if initial is None:  # no root condition given
+            outside[0, len_sentence - 1, :] = 1.0 / num_nonterminals
+        elif type(initial) == int:  # deterministic root
+            outside[0, len_sentence - 1, :] = 0
+            outside[0, len_sentence - 1, initial] = 1
+        elif type(initial) in [np.ndarray, list, tuple]:  # stochastic root
             outside[0, len_sentence - 1, :] = initial
         else:
-            outside[0, len_sentence - 1, :] = 1.0 / num_nonterminals
+            raise ValueError("Unpexpected initial condition: %r" % initial)
 
         for width in reversed(range(1, len_sentence)):
             for start in range(0, len_sentence - width + 1):
                 stop = start + width
-                # case 1 -- [known letters, [N: unknown letters]]: some parent
-                # nonterminal generated some letters to the left of the current
-                # span as well as the nonterminal heading the current span.
+                # case 1 -- parent to the left: there is a parent nonterminal
+                # which generated the current head as well as several letters
+                # to the left of whatever is spanned by the current head.
                 for left in range(0, start):
                     parentprobs = outside[left, stop - 1, :]
                     branchprobs = self.transitions.transpose([1, 2, 0]) @ parentprobs
                     superprob = inside[left, start - 1] @ branchprobs
                     outside[start, stop - 1, :] += superprob
-                # case 2 -- [[N: unknown letters], known letters]: some parent
-                # nonterminal generated some letters to the right of the current
-                # span as well as the nonterminal heading the current span.
+                # case 2 -- parent to the right: there is a parent nonterminal
+                # which generated the current head as well as several letters
+                # to the right of whatever is spanned by the current head.
                 for right in range(stop + 1, len_sentence + 1):
                     parentprobs = outside[start, right - 1, :]
                     branchprobs = self.transitions.transpose([1, 2, 0]) @ parentprobs
                     superprob = inside[stop, right - 1] @ branchprobs.T
                     outside[start, stop - 1, :] += superprob
-        
+
         return outside
 
     def compute_transition_probabilities(self, inside, outside):
@@ -318,26 +333,37 @@ class Grammar(dict):
         
         The entry at (k, i, j) contains the probability that the
         nonterminal k was expanded into the pair of nonterminals (i, j)
-        somewhere in the syntatic tree of this sentence.
+        somewhere in the syntatic tree of this sentence _given_ that
+        the sentence occurred.
+
+        Since each terminal letter except one is explained by one
+        branching transition, the sum of the probabilities in this
+        table sum to the length of the sentence minus 1.
         """
+
+        # probabilities that the root is a nonterminal of type `k`:
+        rootprobs = inside[0, -1, :] * outside[0, -1, :]
+        # probability that the sentence has _any_ root at all:
+        probability_of_sentence = np.sum(rootprobs)
+        assert probability_of_sentence > 0
+        # for each slot in the tree matrix, the conditional probability
+        # that this slot is occupied by a given type of nonterminal,
+        # given that the sentence occurred:
+        nodeprobs = outside / probability_of_sentence
 
         len_sentence, _, num_nonterminals = inside.shape
         joints = np.zeros(3 * [num_nonterminals])
         for start in range(len_sentence):
             for stop in range(start + 2, len_sentence + 1):
-                prior = outside[start, stop - 1, :][:, None, None]
-                conds = np.zeros_like(self.transitions)
+                priors = nodeprobs[start, stop - 1, :]
+                likelihood = np.zeros_like(self.transitions)
                 for split in range(start + 1, stop):
                     qi = inside[start, split - 1, :][None, :, None]
                     qj = inside[split, stop - 1, :][None, None, :]
-                    conds = qi * qj * self.transitions
-                norms = np.sum(conds, axis=(1, 2))
-                conds[norms > 0,] /= norms[norms > 0, None, None]
-                joints += (prior * conds)
+                    likelihood += qi * qj * self.transitions
+                joints += priors[:, None, None] * likelihood
 
-        # sums = np.sum(joints, axis=(1, 2))
-        # posidx, = np.where(sums > 0)
-        # joints[posidx, :, :] /= sums[posidx, None, None]
+        assert np.isclose(joints.sum(), len(sentence) - 1)
 
         return joints
     
@@ -447,3 +473,45 @@ if __name__ == "__main__":
             if prob > 0:
                 print("%s --> %r: %s" % (k, chr(idx), prob))
     print()
+
+    new_transitions = grammar.transitions.copy()
+    new_emissions = grammar.emissions.copy()
+
+    for _ in range(100):
+        print(".", end=" ", flush=True)
+        tree = grammar.sample()
+        sentence = tree.terminals
+        inside = grammar.compute_inside_probabilities(sentence)
+        outside = grammar.compute_outside_probabilities(inside, initial=0)
+        for tp in grammar.compute_transition_probabilities(inside, outside):
+            new_transitions += tp
+        for ep in  grammar.compute_emission_probabilities(sentence, outside):
+            new_emissions += ep
+    print("\n")
+
+    # tsums = np.sum(new_transitions, axis=(1, 2))
+    # esums = np.sum(new_emissions, axis=1)
+    # norms = tsums + esums
+    # new_transitions /= norms[:, None, None]
+    # new_emissions /= norms[:, None]
+    # print(grammar.transitions)
+    # print(grammar.transitions.sum(axis=(1, 2)))
+    # print(grammar.emissions.sum(axis=(1,)))
+    # print()
+    # print(new_transitions.round(3))
+    # print(new_transitions.sum(axis=(1, 2)).round(3))
+    # print(new_emissions.sum(axis=(1,)).round(3))
+    # print()
+
+    # rulebooks = {}
+    # for k, probij in enumerate(new_transitions):
+    #     rulebooks[k] = dict()
+    #     for i, probj in enumerate(probij):
+    #         for j, prob in enumerate(probj):
+    #             rulebooks[k][i, j] = prob
+    # for k, probc in enumerate(new_emissions):
+    #     for idx, prob in enumerate(probc):
+    #         character = chr(idx)
+    #         rulebooks[k][character] = prob
+    
+    # new_grammar = Grammar(rulebooks)
