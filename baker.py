@@ -111,59 +111,6 @@ class Tree(list):
         return np.array(matrix)
 
 
-# def extract_most_likely_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
-#     """ Compute the most likely parse of a sentence. """
-#     if start is None:
-#         start, stop = 0, len(sentence)
-#     if stop == start + 1:
-#         return Tree(root, [sentence[start]])
-#     options = dict()
-#     for rule, ruleprob in grammar[root].items():
-#         if type(rule) == str:
-#             continue  # a terminal can't match >= 2 characters
-#         Nleft, Nright = rule
-#         for mid in range(start + 1, stop):
-#             Pleft = singles[start, mid][Nleft]
-#             Pright = singles[mid, stop][Nright]
-#             options[Nleft, Nright, mid] = ruleprob * Pleft * Pright
-#     assert any(options.values()), "Error: no parse of %s" % options
-#     Nleft, Nright, mid = max(options, key=lambda k: options[k])
-#     assert options[Nleft, Nright, mid] > 0
-#     Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
-#     Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
-#     assert Nleft == Tleft.head
-#     assert Nright == Tright.head
-#     return Tree(root, [Tleft, Tright])
-
-
-# def conditionally_sample_tree(singles, grammar, sentence, start=None, stop=None, root="N0"):
-#     """ Sample a tree that consistent with the given sentence. """
-#     # in the base case, we cover the whole sentence:
-#     if start is None:
-#         start, stop = 0, len(sentence)
-#     if stop == start + 1:
-#         return Tree(root, [sentence[start]])
-#     # find most probable bifurcation of that node:
-#     splits = []
-#     splitprobs = []
-#     for rule, ruleprob in grammar[root].items():
-#         if type(rule) == str:
-#             continue  # a terminal can't match >= 2 characters
-#         Nleft, Nright = rule
-#         for mid in range(start + 1, stop):
-#             Pleft = singles[start, mid][Nleft]
-#             Pright = singles[mid, stop][Nright]
-#             splits.append((Nleft, Nright, mid))
-#             splitprobs.append(ruleprob * Pleft * Pright)
-#     splitprobs = np.array(splitprobs) / sum(splitprobs)
-#     assert any(splitprobs > 0), "Error: no possibilities in %s" % rule
-#     index = np.random.choice(len(splits), p=splitprobs)
-#     Nleft, Nright, mid = splits[index]
-#     Tleft = extract_most_likely_tree(singles, grammar, sentence, start, mid, Nleft)
-#     Tright = extract_most_likely_tree(singles, grammar, sentence, mid, stop, Nright)
-#     return Tree(root, [Tleft, Tright])
-
-
 class Grammar(dict):
 
     def __init__(self, rulebooks=None, transitions=None, emissions=None, size_alphabet=128):
@@ -247,7 +194,7 @@ class Grammar(dict):
         self.update(rulebooks)
         self.validate()
 
-    def sample(self, root=0):
+    def sample_tree(self, root=0):
         """ Sample a random tree below a given nonterminal `root`. """
 
         distribution = self[root]
@@ -256,9 +203,109 @@ class Grammar(dict):
         idx = np.random.choice(len(expansions), p=probabilities)
         children = expansions[idx]
         if type(children) == tuple:
-            return Tree(root, [self.sample(nt) for nt in children])
+            return Tree(root, [self.sample_tree(nt) for nt in children])
         else:
             return Tree(root, [children])  # just a single terminal
+    
+    def conditionally_sample_tree(self, sentence, inside=None, outside=None):
+        """ Sample a tree from the posterior distribution given a sentence. """
+
+        if inside is None:
+            inside = self.compute_inside_probabilities(sentence)
+        
+        if outside is None:
+            outside = self.compute_outside_probabilities(inside)
+
+        posterior = outside[0, -1, :] * inside[0, -1, :]
+        assert np.any(posterior > 0), posterior
+        posterior /= np.sum(posterior)
+        root = np.random.choice(len(posterior), p=posterior)
+
+        if inside.shape[0] == 1:
+            assert len(sentence) == 1
+            return Tree(root, sentence)
+
+        cutprobs = []
+        for cut in range(1, len(sentence)):
+            # compute the likelihood of each pair of children:
+            leftprob = inside[0, cut - 1, :]
+            rightprob = inside[cut, len(sentence) - 1, :]
+            likelihoods = leftprob[:, None] * rightprob[None, :]
+            # look up the probability that the chosen root nonterminal
+            # splits into these two types of child nodes:
+            prior = self.transitions[root, :, :]
+            # combine these to compute add up the total probability
+            # that the cut lies here, across child node types:
+            posterior = np.sum(prior * likelihoods)
+            cutprobs.append(posterior)
+        
+        cutprobs = np.array(cutprobs)
+        assert np.any(cutprobs > 0)
+        cutprobs /= np.sum(cutprobs)
+        cut = 1 + np.random.choice(len(sentence) - 1, p=cutprobs)
+
+        sentence1 = sentence[:cut]
+        inside1 = inside[:cut, :cut, :]
+        outside1 = outside[:cut, :cut, :]
+        assert np.any(inside1[0, -1, :] * outside1[0, -1, :] > 0)
+        branch1 = self.conditionally_sample_tree(sentence1, inside1, outside1)
+
+        sentence2 = sentence[cut:]
+        inside2 = inside[cut:, cut:, :]
+        outside2 = outside[cut:, cut:, :]
+        assert np.any(inside2[0, -1, :] * outside2[0, -1, :] > 0)
+        branch2 = self.conditionally_sample_tree(sentence2, inside2, outside2)
+
+        return Tree(root, [branch1, branch2])
+    
+    def compute_most_likely_tree(self, sentence, inside=None, outside=None):
+        """ Find the most probable tree given the sentence. """
+
+        if inside is None:
+            inside = self.compute_inside_probabilities(sentence)
+        
+        if outside is None:
+            outside = self.compute_outside_probabilities(inside)
+
+        joint = outside[0, -1, :] * inside[0, -1, :]
+        assert np.any(joint > 0), joint
+        root = np.argmax(joint)
+
+        if inside.shape[0] == 1:
+            assert len(sentence) == 1
+            return Tree(root, sentence)
+
+        cutprobs = []
+        for cut in range(1, len(sentence)):
+            # compute the likelihood of each pair of children:
+            leftprob = inside[0, cut - 1, :]
+            rightprob = inside[cut, len(sentence) - 1, :]
+            likelihoods = leftprob[:, None] * rightprob[None, :]
+            # look up the probability that the chosen root nonterminal
+            # splits into these two types of child nodes:
+            prior = self.transitions[root, :, :]
+            # combine these to compute add up the total probability
+            # that the cut lies here, across child node types:
+            posterior = np.sum(prior * likelihoods)
+            cutprobs.append(posterior)
+        
+        cutprobs = np.array(cutprobs)
+        assert np.any(cutprobs > 0)
+        cut = 1 + np.argmax(cutprobs)
+
+        sentence1 = sentence[:cut]
+        inside1 = inside[:cut, :cut, :]
+        outside1 = outside[:cut, :cut, :]
+        assert np.any(inside1[0, -1, :] * outside1[0, -1, :] > 0)
+        branch1 = self.compute_most_likely_tree(sentence1, inside1, outside1)
+
+        sentence2 = sentence[cut:]
+        inside2 = inside[cut:, cut:, :]
+        outside2 = outside[cut:, cut:, :]
+        assert np.any(inside2[0, -1, :] * outside2[0, -1, :] > 0)
+        branch2 = self.compute_most_likely_tree(sentence2, inside2, outside2)
+
+        return Tree(root, [branch1, branch2])
     
     def logprob(self, tree):
         """ Compute the logarithmic probability of a tree in this grammar. """
@@ -475,7 +522,7 @@ if __name__ == "__main__":
     # plt.plot(expected_nonterminals(grammar), "o-")
     # plt.show()
 
-    tree = grammar.sample(root=0)
+    tree = grammar.sample_tree(root=0)
     sentence = tree.flatten()
     print("Sentence: %r\n" % sentence)
     print("Actual tree:\n")
@@ -538,9 +585,9 @@ if __name__ == "__main__":
     trans_acc = np.zeros_like(grammar.transitions)
     emits_acc = np.zeros_like(grammar.emissions)
 
-    for _ in range(300):
+    for _ in range(100):
         print(".", end=" ", flush=True)
-        tree = grammar.sample()
+        tree = grammar.sample_tree()
         sentence = tree.terminals
         # true_tp = np.zeros(3 * [len(grammar)])
         # for (k, i, j), p in tree.transition_counts().items():
@@ -575,3 +622,13 @@ if __name__ == "__main__":
     print(new_transitions.sum(axis=(1, 2)).round(2))
     print(new_emissions.sum(axis=(1,)).round(2))
     print()
+
+    print(sentence, "\n")
+    print("Actual tree:")
+    tree.pprint()
+    print("Most likely tree:")
+    grammar.compute_most_likely_tree(sentence).pprint()
+    print("Some sampled trees:")
+    grammar.conditionally_sample_tree(sentence).pprint()
+    grammar.conditionally_sample_tree(sentence).pprint()
+    grammar.conditionally_sample_tree(sentence).pprint()
