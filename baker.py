@@ -1,493 +1,8 @@
-"""
-The inside-outside algorithm for stochastic grammars.
-
-Code for computing the conditional probability, given a stochastic
-grammar, that a particular part of a sentence is the result of the
-expansion of a particular nonterminal symbol.
-"""
-
-from collections import defaultdict
-from collections import OrderedDict
-# from matplotlib import pyplot as plt
 import numpy as np
+from language_models.grammar import Grammar
 
 
-class Tree(list):
-
-    def __init__(self, head, elms):
-        """ Create a tree with the name `head` and children `elms`. """
-        list.__init__(self, elms)
-        self.head = head
-        if len(elms) == 0:
-            raise ValueError("Trivial leaves prohibited: %r" % (elms,))
-        if len(elms) == 1 and type(elms[0]) == Tree:
-            raise ValueError("Trivial subtrees prohibited: %r" % (elms,))
-        self.terminals = self.collect_terminals()
-        self.size = len(self.terminals)
-
-    def __repr__(self):
-        """ Produce the call that would produce this tree. """
-        return "Tree(%r, %r)" % (self.head, list(self))
-
-    def collect_terminals(self):
-        """ Flatten the tree into a list of terminal strings. """
-        return sum([b.terminals if type(b) == Tree else [b] for b in self], [])
-
-    def flatten(self, sep=""):
-        """ Convert the tree into a sentence. """
-        return sep.join(str(term) for term in self.terminals)
-
-    def pprint(self, depth=0, indent="  "):
-        """ Pretty-print the tree as a nested structure. """
-        margin = depth * indent
-        if len(self) == 1:
-            print(margin + "%r: %r" % (self.head, self[0]))
-        else:
-            print(margin + "%r:" % (self.head,))
-            for branch in self:
-                branch.pprint(depth=depth + 1, indent=indent)
-        if depth == 0:
-            print("")  # empty line at the very end
-    
-    def iter_transitions(self):
-        """ Yield every branching triple k --> (i, j) in the tree. """
-
-        if len(self) == 2:
-            yield self.head, self[0].head, self[1].head
-            for triple in self[0].iter_transitions():
-                yield triple
-            for triple in self[1].iter_transitions():
-                yield triple
-    
-    def transition_counts(self):
-        """ Compile a dict of the frequency of each branching triple. """
-
-        counts = defaultdict(int)
-        for triple in self.iter_transitions():
-            counts[triple] += 1
-        
-        return dict(counts)
-    
-    def iter_emissions(self):
-        """ Yield every (nonterminal, terminal) emission pair. """
-
-        if len(self) == 1:
-            yield self.head, self[0]
-        else:
-            for pair in self[0].iter_emissions():
-                yield pair
-            for pair in self[1].iter_emissions():
-                yield pair
-    
-    def emission_counts(self):
-        """ Compile a dict of the frequency of each emission pair. """
-
-        counts = defaultdict(int)
-        for pair in self.iter_emissions():
-            counts[pair] += 1
-        
-        return dict(counts)
-
-    def spandict(self):
-        """ Convert the tree into a dict of head spans. """
-        size = self.size
-        spans = {(0, size): self.head}
-        if len(self) == 1:
-            return spans
-        left, right = self
-        shift = left.size
-        spans.update(left.spandict())
-        spans.update({(shift + i, shift + j): head
-                      for (i, j), head in right.spandict().items()})
-        return spans
-    
-    def nodematrix(self):
-        """ Convert the tree into a matrix of node names. """
-        size = self.size
-        spans = self.spandict()
-        matrix = [[-1 for _ in range(size)] for _ in range(size)]
-        for (i, j), head in spans.items():
-            matrix[i][j - 1] = head
-        return np.array(matrix)
-
-
-class Grammar(dict):
-
-    def __init__(self, rulebooks=None, transitions=None, emissions=None, size_alphabet=128):
-
-        self.transitions = None
-        self.emissions = None
-
-        if rulebooks is not None:
-            self.update_from_rulebooks(rulebooks, size_alphabet)
-        elif transitions is not None and emissions is not None:
-            self.update_from_matrices(transitions, emissions)
-        else:
-            raise ValueError("Please provide either rulebooks or matrices.")
-    
-    def validate(self):
-        """ Check that all stochastic constraints are satisfied. """
-
-        # This check probably shouldn't live here, but we want to
-        # verify that all the rulebooks are in Chomsky normal form:
-        for nonterminal, rulebook in self.items():
-            for expansion in rulebook.keys():
-                branching = type(expansion) == tuple and len(expansion) == 2
-                closing = type(expansion) in [str, int]
-                assert branching or closing, (nonterminal, expansion)
-
-        for nonterminal, rulebook in self.items():
-            # note: `sum` can take iterables, `np.sum` cannot
-            probsum = sum(rulebook.values())
-            assert np.allclose(probsum, 1.0), (nonterminal, probsum)
-
-        tsums = self.transitions.sum(axis=(1, 2))
-        esums = self.emissions.sum(axis=1)
-        assert np.allclose(tsums + esums, 1.0), (tsums + esums)
-    
-    def update_from_rulebooks(self, rulebooks, size_alphabet=128):
-        """ Convert a dict of nonterminal rulebooks to matrix form. """
-
-        self.update(rulebooks)
-
-        num_nonterminals = len(rulebooks)
-        transitions = np.zeros(3 * [num_nonterminals])
-        emissions = np.zeros([num_nonterminals, size_alphabet])
-
-        for k, rulebook in self.items():
-            for rule, probability in rulebook.items():
-                if type(rule) == str:
-                    # if we used dicts here, we could allow the
-                    # alphabet to be infinite, but at the cost
-                    # of having for parameterize the fallback
-                    # distribution.
-                    idx = ord(rule)
-                    assert idx < size_alphabet, (idx, size_alphabet)
-                    emissions[k, idx] += probability
-                else:
-                    i, j = rule
-                    transitions[k, i, j] += probability
-
-        self.transitions = transitions
-        self.emissions = emissions
-        self.validate()
-    
-    def update_from_matrices(self, transitions, emissions):
-        """ Convert transition and emission matrices to rulebooks. """
-
-        self.transitions = transitions
-        self.emissions = emissions
-
-        rulebooks = dict()
-
-        for k, probij in enumerate(transitions):
-            rulebooks[k] = dict()
-            for i, probj in enumerate(probij):
-                for j, prob in enumerate(probj):
-                    rulebooks[k][i, j] = prob
-
-        for k, probc in enumerate(emissions):
-            for idx, prob in enumerate(probc):
-                character = chr(idx)
-                rulebooks[k][character] = prob
-        
-        self.update(rulebooks)
-        self.validate()
-
-    def sample_tree(self, root=0):
-        """ Sample a random tree below a given nonterminal `root`. """
-
-        distribution = self[root]
-        expansions = list(distribution.keys())
-        probabilities = [distribution[e] for e in expansions]
-        idx = np.random.choice(len(expansions), p=probabilities)
-        children = expansions[idx]
-        if type(children) == tuple:
-            return Tree(root, [self.sample_tree(nt) for nt in children])
-        else:
-            return Tree(root, [children])  # just a single terminal
-    
-    def conditionally_sample_tree(self, sentence, inside=None, outside=None):
-        """ Sample a tree from the posterior distribution given a sentence. """
-
-        if inside is None:
-            inside = self.compute_inside_probabilities(sentence)
-        
-        if outside is None:
-            outside = self.compute_outside_probabilities(inside)
-
-        posterior = outside[0, -1, :] * inside[0, -1, :]
-        assert np.any(posterior > 0), posterior
-        posterior /= np.sum(posterior)
-        root = np.random.choice(len(posterior), p=posterior)
-
-        if inside.shape[0] == 1:
-            assert len(sentence) == 1
-            return Tree(root, sentence)
-
-        cutprobs = []
-        for cut in range(1, len(sentence)):
-            # compute the likelihood of each pair of children:
-            leftprob = inside[0, cut - 1, :]
-            rightprob = inside[cut, len(sentence) - 1, :]
-            likelihoods = leftprob[:, None] * rightprob[None, :]
-            # look up the probability that the chosen root nonterminal
-            # splits into these two types of child nodes:
-            prior = self.transitions[root, :, :]
-            # combine these to compute add up the total probability
-            # that the cut lies here, across child node types:
-            posterior = np.sum(prior * likelihoods)
-            cutprobs.append(posterior)
-        
-        cutprobs = np.array(cutprobs)
-        assert np.any(cutprobs > 0)
-        cutprobs /= np.sum(cutprobs)
-        cut = 1 + np.random.choice(len(sentence) - 1, p=cutprobs)
-
-        sentence1 = sentence[:cut]
-        inside1 = inside[:cut, :cut, :]
-        outside1 = outside[:cut, :cut, :]
-        assert np.any(inside1[0, -1, :] * outside1[0, -1, :] > 0)
-        branch1 = self.conditionally_sample_tree(sentence1, inside1, outside1)
-
-        sentence2 = sentence[cut:]
-        inside2 = inside[cut:, cut:, :]
-        outside2 = outside[cut:, cut:, :]
-        assert np.any(inside2[0, -1, :] * outside2[0, -1, :] > 0)
-        branch2 = self.conditionally_sample_tree(sentence2, inside2, outside2)
-
-        return Tree(root, [branch1, branch2])
-    
-    def compute_most_likely_tree(self, sentence, inside=None, outside=None):
-        """ Find the most probable tree given the sentence. """
-
-        if inside is None:
-            inside = self.compute_inside_probabilities(sentence)
-        
-        if outside is None:
-            outside = self.compute_outside_probabilities(inside)
-
-        joint = outside[0, -1, :] * inside[0, -1, :]
-        assert np.any(joint > 0), joint
-        root = np.argmax(joint)
-
-        if inside.shape[0] == 1:
-            assert len(sentence) == 1
-            return Tree(root, sentence)
-
-        cutprobs = []
-        for cut in range(1, len(sentence)):
-            # compute the likelihood of each pair of children:
-            leftprob = inside[0, cut - 1, :]
-            rightprob = inside[cut, len(sentence) - 1, :]
-            likelihoods = leftprob[:, None] * rightprob[None, :]
-            # look up the probability that the chosen root nonterminal
-            # splits into these two types of child nodes:
-            prior = self.transitions[root, :, :]
-            # combine these to compute add up the total probability
-            # that the cut lies here, across child node types:
-            posterior = np.sum(prior * likelihoods)
-            cutprobs.append(posterior)
-        
-        cutprobs = np.array(cutprobs)
-        assert np.any(cutprobs > 0)
-        cut = 1 + np.argmax(cutprobs)
-
-        sentence1 = sentence[:cut]
-        inside1 = inside[:cut, :cut, :]
-        outside1 = outside[:cut, :cut, :]
-        assert np.any(inside1[0, -1, :] * outside1[0, -1, :] > 0)
-        branch1 = self.compute_most_likely_tree(sentence1, inside1, outside1)
-
-        sentence2 = sentence[cut:]
-        inside2 = inside[cut:, cut:, :]
-        outside2 = outside[cut:, cut:, :]
-        assert np.any(inside2[0, -1, :] * outside2[0, -1, :] > 0)
-        branch2 = self.compute_most_likely_tree(sentence2, inside2, outside2)
-
-        return Tree(root, [branch1, branch2])
-    
-    def logprob(self, tree):
-        """ Compute the logarithmic probability of a tree in this grammar. """
-
-        if len(tree) == 1:
-            child = tree[0]
-            return np.log(self[tree.head][child])
-        else:
-            children = tuple(branch.head for branch in tree)
-            logprob = np.log(self[tree.head][children])
-            logprob += sum(self.logprob(branch) for branch in tree)
-            return logprob
-    
-    def prob(self, tree):
-        """ Compute the probability of a tree in this grammar. """
-
-        return np.exp(self.logprob(tree))
-
-    def compute_expected_lengths(self):
-        """ Compute the mean num terminals under each nonterminal. """
-
-        matrix = np.zeros((len(self) + 1, len(self) + 1))
-        matrix[-1, -1] = 1.0
-
-        for nonterminal, rulebook in self.items():
-            for expansion, probability in rulebook.items():
-                # case one: the rule expands the LHS into nonterminals:
-                if type(expansion) == tuple:
-                    for nt in expansion:
-                        matrix[nonterminal, nt] += probability
-                # case two: the rule expands the LHS into a terminal:
-                else:
-                    matrix[nonterminal, -1] += probability
-
-        values, vectors = np.linalg.eig(matrix)
-
-        if np.any(values > 1.0):
-            return float("inf")
-        
-        idx, = np.where(values == 1.0)
-
-        if len(idx) > 1:
-            raise ValueError("The grammar contains unreachable nonterminals.")
-
-        expectations = vectors[:, idx.item()]
-        expectations /= expectations[-1]  # normalize using terminal length
-
-        return np.real(expectations)
-
-    def compute_inside_probabilities(self, sentence):
-        """ Compute the likelihood of each substring given each nonterminal. """
-
-        len_sentence = len(sentence)
-        inside = np.zeros(2*[len_sentence] + [len(self)])
-
-        for start, character in enumerate(sentence):
-            for k, rulebook in self.items():
-                for rule, probability in rulebook.items():
-                    if type(rule) == str and rule == character:
-                        inside[start, start, k] += probability
-
-        for width in range(2, len(sentence) + 1):
-            for start in range(0, len(sentence) - width + 1):
-                stop = start + width
-                for split in range(start + 1, stop):
-                    left = inside[start, split - 1, :]
-                    right = inside[split, stop - 1, :]
-                    coverprobs = left[:, None] * right[None, :]
-                    joints = np.sum(self.transitions * coverprobs, axis=(1, 2))
-                    inside[start, stop - 1, :] += joints
-        
-        return inside
-
-    def compute_outside_probabilities(self, inside, initial=None):
-        """ Given letter-generation likelihoods, compute node probs.
-        
-        The result is an array of shape `[T, T, N]`, where `T` is the
-        length of the sentence and `N` is the number of nonterminals.
-
-        The entry at `(s, t, n)` contains the probability that the
-        grammar would generate the letters from `0` to `s` and from
-        `t` to `T`, as well as generate a node of type `n` at the top
-        of the subtree spanning the letters from `s` to `t`.
-        """
-
-        len_sentence, _, num_nonterminals = inside.shape
-        outside = np.zeros(2*[len_sentence] + [len(self)])
-
-        if initial is None:  # no root condition given
-            outside[0, len_sentence - 1, :] = 1.0 / num_nonterminals
-        elif type(initial) == int:  # deterministic root
-            outside[0, len_sentence - 1, :] = 0
-            outside[0, len_sentence - 1, initial] = 1
-        elif type(initial) in [np.ndarray, list, tuple]:  # stochastic root
-            outside[0, len_sentence - 1, :] = initial
-        else:
-            raise ValueError("Unpexpected initial condition: %r" % initial)
-
-        for width in reversed(range(1, len_sentence)):
-            for start in range(0, len_sentence - width + 1):
-                stop = start + width
-                # case 1 -- parent to the left: there is a parent nonterminal
-                # which generated the current head as well as several letters
-                # to the left of whatever is spanned by the current head.
-                for left in range(0, start):
-                    parentprobs = outside[left, stop - 1, :]
-                    branchprobs = self.transitions.transpose([1, 2, 0]) @ parentprobs
-                    superprob = inside[left, start - 1] @ branchprobs
-                    outside[start, stop - 1, :] += superprob
-                # case 2 -- parent to the right: there is a parent nonterminal
-                # which generated the current head as well as several letters
-                # to the right of whatever is spanned by the current head.
-                for right in range(stop + 1, len_sentence + 1):
-                    parentprobs = outside[start, right - 1, :]
-                    branchprobs = self.transitions.transpose([1, 2, 0]) @ parentprobs
-                    superprob = inside[stop, right - 1] @ branchprobs.T
-                    outside[start, stop - 1, :] += superprob
-
-        return outside
-
-    def sum_transition_probabilities(self, inside, outside):
-        """ Sum up joint expansion probabilities given the sentence.
-        
-        This returns a matrix of shape `(N, N, N)`, where `N` is the
-        number of nonterminal symbols in the grammar.
-        
-        The entry at (k, i, j) contains the probability that the
-        nonterminal k was expanded into the pair of nonterminals (i, j)
-        somewhere in the syntatic tree of this sentence _given_ that
-        the sentence occurred.
-
-        Since each terminal letter except one is explained by one
-        branching transition, the sum of the probabilities in this
-        table sum to the length of the sentence minus 1.
-        """
-
-        # probabilities that the root is a nonterminal of type `k`:
-        rootprobs = inside[0, -1, :] * outside[0, -1, :]
-        # probability that the sentence has _any_ root at all:
-        probability_of_sentence = np.sum(rootprobs)
-        assert probability_of_sentence > 0, probability_of_sentence
-        # for each slot in the tree matrix, the conditional probability
-        # that this slot is occupied by a given type of nonterminal,
-        # given that the sentence occurred:
-        nodeprobs = outside / probability_of_sentence
-
-        len_sentence, _, num_nonterminals = inside.shape
-        joints = np.zeros(3 * [num_nonterminals])
-        for start in range(len_sentence):
-            for stop in range(start + 2, len_sentence + 1):
-                priors = nodeprobs[start, stop - 1, :]
-                likelihood = np.zeros_like(self.transitions)
-                for split in range(start + 1, stop):
-                    qi = inside[start, split - 1, :][None, :, None]
-                    qj = inside[split, stop - 1, :][None, None, :]
-                    likelihood += qi * qj * self.transitions
-                joints += priors[:, None, None] * likelihood
-
-        assert np.isclose(joints.sum(), len(sentence) - 1), joints.sum()
-
-        return joints
-    
-    def sum_emission_probabilities(self, sentence, outside):
-
-        size_alphabet = 128  # hardcoded for now
-
-        _, _, num_nonterminals = outside.shape
-        probs = np.zeros((num_nonterminals, size_alphabet))
-
-        for start, character in enumerate(sentence):
-            idx = ord(character)
-            priors = outside[start, start, :]  # shape (N,)
-            likelihoods = self.emissions[:, idx]  # shape (N,)
-            posteriors = priors * likelihoods
-            if np.any(posteriors > 0):
-                posteriors /= posteriors.sum()
-            probs[:, idx] += posteriors
-        
-        return probs
-
-
-codex = {
+rulebooks = {
 
     0: {
         (1, 1): 0.4,
@@ -514,10 +29,13 @@ codex = {
 }
 
 
+alphabet = "abcd"
+
+
 if __name__ == "__main__":
 
     # assert grammar_is_normalized(codex)  # TODO: write normalizer
-    grammar = Grammar(codex)
+    grammar = Grammar(rulebooks=rulebooks, alphabet=alphabet)
 
     # plt.plot(expected_nonterminals(grammar), "o-")
     # plt.show()
@@ -549,7 +67,7 @@ if __name__ == "__main__":
     print("Actual node matrix:\n%s\n" % tree.nodematrix())
     print("Most probable nodes:\n%s\n" % most_probable_nodes)
     print("Actual occupancy matrix:\n%s\n" % (tree.nodematrix() != -1).astype(float))
-    print("Most probable occupancy:\n%s\n" % posteriors.sum(axis=2).round(3))
+    print("Occupancy probabilitie:\n%s\n" % posteriors.sum(axis=2).round(2))
 
     print("Actually occurred transitions:")
     for (k, i, j), count in tree.transition_counts().items():
@@ -567,11 +85,11 @@ if __name__ == "__main__":
     print("")
 
     print("Emission probabilities:")
-    for idx in range(128):
+    for idx, character in enumerate(grammar.alphabet):
         post = emitsprobs[:, idx]
         for k, prob in enumerate(post):
             if prob > 0:
-                print("%s --> %r: %s" % (k, chr(idx), prob))
+                print("%s --> %r: %s" % (k, character, prob))
     print()
 
     N, S = grammar.emissions.shape
@@ -580,30 +98,35 @@ if __name__ == "__main__":
     norms = np.sum(randtrans, axis=(1, 2)) + np.sum(randemits, axis=1)
     randtrans /= norms[:, None, None]
     randemits /= norms[:, None]
-    estimated_grammar = Grammar(transitions=randtrans, emissions=randemits)
+
+    estimated_grammar = Grammar(transitions=randtrans,
+                                emissions=randemits,
+                                alphabet=alphabet)
 
     trans_acc = np.zeros_like(grammar.transitions)
     emits_acc = np.zeros_like(grammar.emissions)
 
-    for _ in range(100):
-        print(".", end=" ", flush=True)
-        tree = grammar.sample_tree()
+    trees = [grammar.sample_tree() for _ in range(100)]
+    trees = [tree for tree in trees if tree.size <= 40]
+
+    for tree in trees:
         sentence = tree.terminals
+        print(".", end=" ", flush=True)
         # true_tp = np.zeros(3 * [len(grammar)])
         # for (k, i, j), p in tree.transition_counts().items():
         #     true_tp[k, i, j] += p
         # true_ep = np.zeros([len(grammar), 128])
         # for (k, c), p in  tree.emission_counts().items():
         #     true_ep[k, ord(c)] += p
-        
-        # inside = grammar.compute_inside_probabilities(sentence)
-        # outside = grammar.compute_outside_probabilities(inside, initial=0)
-        # trans_acc += grammar.sum_transition_probabilities(inside, outside)
-        # emits_acc += grammar.sum_emission_probabilities(sentence, outside)
-        inside = estimated_grammar.compute_inside_probabilities(sentence)
-        outside = estimated_grammar.compute_outside_probabilities(inside, initial=0)
-        trans_acc += estimated_grammar.sum_transition_probabilities(inside, outside)
-        emits_acc += estimated_grammar.sum_emission_probabilities(sentence, outside)
+
+        inside = grammar.compute_inside_probabilities(sentence)
+        outside = grammar.compute_outside_probabilities(inside, initial=0)
+        trans_acc += grammar.sum_transition_probabilities(inside, outside)
+        emits_acc += grammar.sum_emission_probabilities(sentence, outside)
+        # inside = estimated_grammar.compute_inside_probabilities(sentence)
+        # outside = estimated_grammar.compute_outside_probabilities(inside, initial=0)
+        # trans_acc += estimated_grammar.sum_transition_probabilities(inside, outside)
+        # emits_acc += estimated_grammar.sum_emission_probabilities(sentence, outside)
 
     print("\n")
 
@@ -614,12 +137,17 @@ if __name__ == "__main__":
     new_emissions = emits_acc / norms[:, None]
 
     print(grammar.transitions)
+    print()
+    print(new_transitions.round(2))
+    print()
     print(grammar.transitions.sum(axis=(1, 2)))
-    print(grammar.emissions.sum(axis=(1,)))
-    print()
-    print(new_transitions.round(3))
-    print()
     print(new_transitions.sum(axis=(1, 2)).round(2))
+    print()
+    print(grammar.emissions)
+    print()
+    print(new_emissions.round(2))
+    print()
+    print(grammar.emissions.sum(axis=(1,)))
     print(new_emissions.sum(axis=(1,)).round(2))
     print()
 
