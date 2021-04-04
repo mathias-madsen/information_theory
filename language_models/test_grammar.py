@@ -373,29 +373,6 @@ if __name__ == "__main__":
     test_that_transition_probabilities_are_in_the_right_range()
     test_that_transition_probabilities_are_well_calibrated()
 
-    # print("Actually occurred transitions:")
-    # for (k, i, j), count in tree.transition_counts().items():
-    #     print("%s --> (%s, %s): %s" % (k, i, j, count))
-    # print()
-
-    # print("Transition probabilities:")
-    # for (k, i, j) in zip(*np.where(transprobs)):
-    #     print("%s --> (%s, %s): %s" % (k, i, j, transprobs[k, i, j]))
-    # print()
-
-    # print("Actually occurred emissions:")
-    # for ((i, c), count) in tree.emission_counts().items():
-    #     print("%s --> %r: %s" % (i, c, count))
-    # print("")
-
-    # print("Emission probabilities:")
-    # for idx, character in enumerate(grammar.alphabet):
-    #     post = emitsprobs[:, idx]
-    #     for k, prob in enumerate(post):
-    #         if prob > 0:
-    #             print("%s --> %r: %s" % (k, character, prob))
-    # print()
-
     # N, S = grammar.emissions.shape
     # randtrans = 0.2 * np.random.gamma(1.0, size=(N, N, N))
     # randemits = 0.8 * np.random.gamma(1.0, size=(N, S))
