@@ -163,7 +163,7 @@ if __name__ == "__main__":
     test_that_tree_probs_agree_with_explicit_computations()
     test_that_total_likelihood_exceeds_single_largest_likelihood()
     test_that_sampling_methods_are_stochastic()
-    test_that_most_probable_tree_is_deterministic()
+    test_that_most_probable_always_returns_a_tree_of_the_same_logprob()
     test_that_most_probable_tree_is_most_probable()
     
     # # assert grammar_is_normalized(codex)  # TODO: write normalizer
