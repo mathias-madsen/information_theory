@@ -30,12 +30,14 @@ rulebooks = {
 }
 
 
-alphabet = "abcd"
-
-
 def test_that_grammar_from_rulebooks_compiles_alphabet_correctly():
 
+    rulebooks = {0: {"a": 0.5, "d": 0.5}, 1: {"c": 0.3, "b": 0.7}}
+
     grammar = Grammar(rulebooks)
+    assert grammar.alphabet == tuple("abcd")
+
+    grammar = Grammar(rulebooks, alphabet=None)  # same as above
     assert grammar.alphabet == tuple("abcd")
 
     grammar = Grammar(rulebooks, alphabet="abcdX")
@@ -59,7 +61,16 @@ def test_that_grammar_computes_probabilities_in_the_right_range():
 
 def test_that_tree_probs_agree_with_explicit_computations():
 
-    grammar = Grammar(rulebooks)
+    # define the grammar here to make sure it stays put:
+
+    frozen = {
+        0: {(1, 1): 0.4, (1, 2): 0.6},
+        1: {(1, 2): 0.2, (2, 1): 0.3, 'a': 0.5},
+        2: {(1, 3): 0.1, (1, 2): 0.2, 'b': 0.7},
+        3: {'c': 0.6, 'd': 0.4}
+        }
+
+    grammar = Grammar(frozen)
 
     tree1 = Tree(1, ["a"])
     prob1 = grammar.prob(tree1)
@@ -252,6 +263,98 @@ def test_that_occupancy_probabilities_are_not_zero_at_filled_slots():
     assert np.all(fillprob[isfilled == 1.0] > 0)  # same: filled ==> p > 0
 
 
+def test_that_emission_probabilities_are_in_the_right_range():
+
+    # first define a grammar with some overlap between the
+    # terminals that can be produced by different nonterminals:
+    rulebooks = {
+        0: {(1, 1): 0.3, (1, 2): 0.4, 'a': 0.3},
+        1: {(1, 2): 0.2, (2, 1): 0.3, 'b': 0.4, 'a': 0.1},
+        2: {'a': 0.3, 'b': 0.7}
+        }
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    sentence = tree.terminals
+
+    inside = grammar.compute_inside_probabilities(sentence)
+    outside = grammar.compute_outside_probabilities(inside, initial=0)
+    probsums = grammar.sum_emission_probabilities(sentence, outside)
+
+    assert np.all(probsums >= 0.0)  # but may be larger than 1.0
+
+    for (nt, letter) in tree.iter_emissions():
+        idx = grammar.alphabet.index(letter)
+        assert probsums[nt, idx] > 0.0  # must be positive if it happened
+
+
+def test_that_emission_probabilities_are_well_calibrated():
+
+    # first define a grammar with some overlap between the
+    # terminals that can be produced by different nonterminals:
+    rulebooks = {
+        0: {(1, 1): 0.3, (1, 2): 0.4, 'a': 0.3},
+        1: {(1, 2): 0.2, (2, 1): 0.3, 'b': 0.4, 'a': 0.1},
+        2: {'a': 0.3, 'b': 0.7}
+        }
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    sentence = tree.terminals
+
+    inside = grammar.compute_inside_probabilities(sentence)
+    outside = grammar.compute_outside_probabilities(inside, initial=0)
+    probsums = grammar.sum_emission_probabilities(sentence, outside)
+
+    num_samples = 400
+    occursums = np.zeros_like(probsums)
+    for _ in range(num_samples):
+        randtree = grammar.conditionally_sample_tree(sentence, inside, root=0)
+        for (nt, letter) in randtree.iter_emissions():
+            idx = grammar.alphabet.index(letter)
+            occursums[nt, idx] += 1
+    occursums /= num_samples
+
+    assert np.allclose(probsums, occursums, atol=0.1)
+
+
+def test_that_transition_probabilities_are_in_the_right_range():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    sentence = tree.terminals
+
+    inside = grammar.compute_inside_probabilities(sentence)
+    outside = grammar.compute_outside_probabilities(inside, initial=0)
+    probsums = grammar.sum_transition_probabilities(inside, outside)
+
+    assert np.all(probsums >= 0.0)  # but may be larger than 1.0
+
+    for triple in tree.iter_transitions():
+        assert probsums[triple] > 0.0
+
+
+def test_that_transition_probabilities_are_well_calibrated():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    sentence = tree.terminals
+
+    inside = grammar.compute_inside_probabilities(sentence)
+    outside = grammar.compute_outside_probabilities(inside, initial=0)
+    probsums = grammar.sum_transition_probabilities(inside, outside)
+
+    num_samples = 400
+    occursums = np.zeros_like(probsums)
+    for _ in range(num_samples):
+        randtree = grammar.conditionally_sample_tree(sentence, inside, root=0)
+        for triple in randtree.iter_transitions():
+            occursums[triple] += 1
+    occursums /= num_samples
+
+    assert np.allclose(probsums, occursums, atol=0.1)
+
+
 if __name__ == "__main__":
 
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
@@ -265,41 +368,10 @@ if __name__ == "__main__":
     test_that_conditional_probability_agrees_with_alternative_computation()
     test_that_tree_prob_is_well_calibrated()
     test_that_occupancy_probabilities_are_not_zero_at_filled_slots()
-    
-    # # assert grammar_is_normalized(codex)  # TODO: write normalizer
-    # grammar = Grammar(rulebooks=rulebooks, alphabet=alphabet)
-
-    # # plt.plot(expected_nonterminals(grammar), "o-")
-    # # plt.show()
-
-    # tree = grammar.sample_tree(root=0)
-    # sentence = tree.flatten()
-    # print("Sentence: %r\n" % sentence)
-    # print("Actual tree:\n")
-    # tree.pprint()
-    # print("log(probability) = %.5f.\n" % grammar.logprob(tree))
-
-    # # parse the sentence:
-    # inside = grammar.compute_inside_probabilities(sentence)
-    # assert inside[0, len(sentence) - 1, 0] > 0  # P(root = N_0) = 1
-    # initial = np.array([1.] + (len(grammar) - 1)*[0.])
-    # outside = grammar.compute_outside_probabilities(inside, initial=initial)
-    # # Compute the node-specific occupancy probabilities:
-    # posteriors = inside * outside
-    # posteriors /= posteriors[0, -1, :].sum()
-    # num_nonterminals_in_tree = 2*len(sentence) - 1
-    # assert np.isclose(posteriors[0, -1].sum(), 1.0)
-    # assert np.isclose(posteriors.sum(), num_nonterminals_in_tree)
-    # transprobs = grammar.sum_transition_probabilities(inside, outside)
-    # emitsprobs = grammar.sum_emission_probabilities(sentence, outside)
-
-    # most_probable_nodes = np.argmax(posteriors, axis=2)
-    # rows, cols = np.where(np.max(posteriors, axis=2) == 0)
-    # most_probable_nodes[rows, cols] = -1
-    # print("Actual node matrix:\n%s\n" % tree.nodematrix())
-    # print("Most probable nodes:\n%s\n" % most_probable_nodes)
-    # print("Actual occupancy matrix:\n%s\n" % (tree.nodematrix() != -1).astype(float))
-    # print("Occupancy probabilitie:\n%s\n" % posteriors.sum(axis=2).round(2))
+    test_that_emission_probabilities_are_in_the_right_range()
+    test_that_emission_probabilities_are_well_calibrated()
+    test_that_transition_probabilities_are_in_the_right_range()
+    test_that_transition_probabilities_are_well_calibrated()
 
     # print("Actually occurred transitions:")
     # for (k, i, j), count in tree.transition_counts().items():
@@ -382,13 +454,3 @@ if __name__ == "__main__":
     # print(grammar.emissions.sum(axis=(1,)))
     # print(new_emissions.sum(axis=(1,)).round(2))
     # print()
-
-    # print(sentence, "\n")
-    # print("Actual tree:")
-    # tree.pprint()
-    # print("Most likely tree:")
-    # grammar.compute_most_likely_tree(sentence).pprint()
-    # print("Some sampled trees:")
-    # grammar.conditionally_sample_tree(sentence).pprint()
-    # grammar.conditionally_sample_tree(sentence).pprint()
-    # grammar.conditionally_sample_tree(sentence).pprint()
