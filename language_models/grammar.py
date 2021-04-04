@@ -273,6 +273,31 @@ class Grammar(dict):
             logprob += sum(self.logprob(branch) for branch in tree)
             return logprob
     
+    def conditional_prob(self, tree, inner=None, root=None):
+        """ Compute the conditional probability of tree given terminals. """
+
+        if inner is None:
+            inner = self.compute_inside_probabilities(tree.terminals)
+
+        dist = self.get_root_distribution(root)
+        denom = np.sum(dist * inner[0, -1, :])  # shapes (N,) --> ()
+        
+        if denom == 0.0:
+            message = "Zero-probability condition: %r" % tree.terminals
+            raise ZeroDivisionError(message)
+        else:
+            assert denom > 0, denom
+        
+        rootprob = dist[tree.head]
+
+        if rootprob == 0.0:
+            return 0.0
+
+        lognumerator = self.logprob(tree) + np.log(rootprob)
+        logconditional = lognumerator - np.log(denom)
+
+        return np.exp(logconditional)
+
     def prob(self, tree):
         """ Compute the probability of a tree in this grammar. """
 

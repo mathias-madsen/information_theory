@@ -130,7 +130,7 @@ def test_that_most_probable_always_returns_a_tree_of_the_same_logprob():
     best_tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
     best_logprob = grammar.logprob(best_tree)
 
-    for _ in range(100):
+    for _ in range(20):
         tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
         assert np.isclose(grammar.logprob(tree), best_logprob)
 
@@ -156,6 +156,53 @@ def test_that_most_probable_tree_is_most_probable():
         assert random_logprob <= best_logprob + 1e-14, (random_logprob, best_logprob)
 
 
+def test_that_conditional_probability_agrees_with_alternative_computation():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    word = tree.terminals
+    
+    # compute the total likelihood of the letters, summed over all trees:
+    inner = grammar.compute_inside_probabilities(word)
+    word_likelihood = inner[0, -1, 0]  # assume root head is 0
+    assert word_likelihood > 0
+
+    # compute the conditional probability of the tree given the letters:
+    conditional_logprob = grammar.logprob(tree) - np.log(word_likelihood)
+    conditional_prob = np.exp(conditional_logprob)
+
+    # perform the same computation using the method:
+    by_method = grammar.conditional_prob(tree, root=0)
+
+    assert np.isclose(conditional_prob, by_method)
+
+
+def test_that_tree_prob_is_well_calibrated():
+
+    grammar = Grammar(rulebooks)
+
+    while True:
+        tree = grammar.sample_tree(root=0)
+        word = tree.terminals
+        if 4 <= len(word) <= 8:
+            break
+    
+    inner = grammar.compute_inside_probabilities(word)
+    conditional_prob = grammar.conditional_prob(tree, inner, root=0)
+
+    # empiricall estimate the conditional frequency of the tree:
+    sample = lambda: grammar.conditionally_sample_tree(word, inner, root=0)
+    num_samples = 1000
+    empirical = np.mean([tree == sample() for _ in range(num_samples)])
+
+    # compute the standard deviation of the average, and cast a wide net:
+    std = 0.25 / num_samples ** 0.5
+    atol = 5.0 * std  # 5 stds ~ about one in a million chance
+
+    # check that the empirical and theoretical frequencies roughly agree:
+    assert np.isclose(empirical, conditional_prob, atol=atol)
+
+
 if __name__ == "__main__":
 
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
@@ -165,6 +212,8 @@ if __name__ == "__main__":
     test_that_sampling_methods_are_stochastic()
     test_that_most_probable_always_returns_a_tree_of_the_same_logprob()
     test_that_most_probable_tree_is_most_probable()
+    test_that_conditional_probability_agrees_with_alternative_computation()
+    test_that_tree_prob_is_well_calibrated()
     
     # # assert grammar_is_normalized(codex)  # TODO: write normalizer
     # grammar = Grammar(rulebooks=rulebooks, alphabet=alphabet)
