@@ -114,6 +114,14 @@ def test_that_sampling_methods_are_stochastic():
 
 
 def test_that_most_probable_always_returns_a_tree_of_the_same_logprob():
+    """
+    Because of slight numerical instabilities, the most-likely-tree
+    method does _not_ in fact always return the same tree when there
+    are multiple trees with the same or very nearly the same likelihood.
+
+    The best we can ask for is that the method returns _a_ best tree,
+    defined as one with the biggest likelihood, or nearly the biggest.
+    """
 
     grammar = Grammar(rulebooks)
     actual_tree = grammar.sample_tree()
