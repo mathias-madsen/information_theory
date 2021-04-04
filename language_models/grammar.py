@@ -302,6 +302,18 @@ class Grammar(dict):
         """ Compute the probability of a tree in this grammar. """
 
         return np.exp(self.logprob(tree))
+    
+    def compute_occupancy_probabilities(self, sentence, root=None):
+        """ For each nonterminal slot, get the possibility it is filled. """
+
+        inside = self.compute_inside_probabilities(sentence)
+        outside = self.compute_outside_probabilities(inside, initial=root)
+
+        posteriors = inside * outside
+        assert posteriors[0, -1, :].sum() > 0
+        posteriors /= posteriors[0, -1, :].sum()
+        
+        return posteriors.sum(axis=2)
 
     def compute_expected_lengths(self):
         """ Compute the mean num terminals under each nonterminal. """

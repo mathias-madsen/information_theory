@@ -94,22 +94,38 @@ class Tree(list):
 
     def spandict(self):
         """ Convert the tree into a dict of head spans. """
+        
         size = self.size
         spans = {(0, size): self.head}
+        
         if len(self) == 1:
             return spans
+        
         left, right = self
-        shift = left.size
+        cut = left.size
         spans.update(left.spandict())
-        spans.update({(shift + i, shift + j): head
+        spans.update({(cut + i, cut + j): head
                       for (i, j), head in right.spandict().items()})
+        
         return spans
     
-    def nodematrix(self):
+    def get_occupancy_matrix(self, dtype=float):
+        """ Return a binary occupancy matrix, disregarding node types. """
+
+        occupancy = np.zeros((self.size, self.size), dtype=dtype)
+        
+        for i, j in self.spandict().keys():
+            occupancy[i, j - 1] = 1
+        
+        return occupancy
+    
+    def nodematrix(self, empty_slot_value=-1):
         """ Convert the tree into a matrix of node names. """
-        size = self.size
-        spans = self.spandict()
-        matrix = [[-1 for _ in range(size)] for _ in range(size)]
-        for (i, j), head in spans.items():
-            matrix[i][j - 1] = head
-        return np.array(matrix)
+        
+        heads = np.zeros((self.size, self.size), dtype=int)
+        heads[:, :] = empty_slot_value  # for unoccupied locations
+
+        for (i, j), head in self.spandict().items():
+            heads[i, j - 1] = head
+
+        return heads

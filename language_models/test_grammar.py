@@ -97,17 +97,26 @@ def pairwise_equalities(things):
                      for j in range(i + 1, len(things))])
 
 
-def test_that_sampling_methods_are_stochastic():
+def test_that_sample_returns_trees_with_different_terminals():
 
     grammar = Grammar(rulebooks)
     trees = [grammar.sample_tree(root=0) for _ in range(100)]
     words = ["".join(tree.terminals) for tree in trees]
+    
     assert len(set(words)) > 1
 
+
+def test_that_conditional_sampling_returns_different_trees():
+
+    grammar = Grammar(rulebooks)
     word = "abba"  # structually ambiguous under the grammar
     inner = grammar.compute_inside_probabilities(word)
     trees = [grammar.conditionally_sample_tree(word, inner, root=0)
-             for _ in range(30)]    
+             for _ in range(30)]
+    
+    # we sample different trees, but they all have the same leaves:
+    assert set(["".join(tree.terminals) for tree in trees]) == set([word])
+
     comparisons = pairwise_equalities(trees)
     assert any(comparisons)  # it virtually impossible they're all identical
     assert not all(comparisons)  # they cannot all be different either
@@ -184,7 +193,7 @@ def test_that_tree_prob_is_well_calibrated():
     while True:
         tree = grammar.sample_tree(root=0)
         word = tree.terminals
-        if 4 <= len(word) <= 8:
+        if len(word) <= 10:  # it takes forever with long words
             break
     
     inner = grammar.compute_inside_probabilities(word)
@@ -192,7 +201,7 @@ def test_that_tree_prob_is_well_calibrated():
 
     # empiricall estimate the conditional frequency of the tree:
     sample = lambda: grammar.conditionally_sample_tree(word, inner, root=0)
-    num_samples = 1000
+    num_samples = 400
     empirical = np.mean([tree == sample() for _ in range(num_samples)])
 
     # compute the standard deviation of the average, and cast a wide net:
@@ -203,17 +212,59 @@ def test_that_tree_prob_is_well_calibrated():
     assert np.isclose(empirical, conditional_prob, atol=atol)
 
 
+def test_that_occupancy_probabilities_are_in_the_unit_interval():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    fillprob = grammar.compute_occupancy_probabilities(tree.terminals)
+
+    assert np.all(fillprob >= 0.0 - 1e-12)
+    assert np.all(fillprob <= 1.0 + 1e-12)
+
+
+def test_that_occupancy_probabilities_are_zero_and_one_where_expected():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    
+    fillprob = grammar.compute_occupancy_probabilities(tree.terminals)
+    assert np.allclose(fillprob.diagonal(), 1.0)  # terminals have parents
+    
+    should_be_upper = fillprob - np.diag(fillprob.diagonal())
+    assert np.allclose(np.tril(should_be_upper), 0)  # no p>0 below diagonal
+
+    # each branching gives rise to one extra nonterminals and one
+    # extra terminal; exactly `size` nonterminals are not going to
+    # branch out. Together, this implies the following constraint:
+    expected_probsum = 2*tree.size - 1
+    computed_probsum = np.sum(fillprob)
+    assert np.isclose(expected_probsum, computed_probsum)
+
+
+def test_that_occupancy_probabilities_are_not_zero_at_filled_slots():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree(root=0)
+    isfilled = tree.get_occupancy_matrix(dtype=float)
+    fillprob = grammar.compute_occupancy_probabilities(tree.terminals, root=0)
+
+    assert np.all(isfilled[fillprob == 0.0] == 0)  # p = 0 ==> not filled
+    assert np.all(fillprob[isfilled == 1.0] > 0)  # same: filled ==> p > 0
+
+
 if __name__ == "__main__":
 
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
     test_that_grammar_computes_probabilities_in_the_right_range()
     test_that_tree_probs_agree_with_explicit_computations()
     test_that_total_likelihood_exceeds_single_largest_likelihood()
-    test_that_sampling_methods_are_stochastic()
+    test_that_sample_returns_trees_with_different_terminals()
+    test_that_conditional_sampling_returns_different_trees()
     test_that_most_probable_always_returns_a_tree_of_the_same_logprob()
     test_that_most_probable_tree_is_most_probable()
     test_that_conditional_probability_agrees_with_alternative_computation()
     test_that_tree_prob_is_well_calibrated()
+    test_that_occupancy_probabilities_are_not_zero_at_filled_slots()
     
     # # assert grammar_is_normalized(codex)  # TODO: write normalizer
     # grammar = Grammar(rulebooks=rulebooks, alphabet=alphabet)
