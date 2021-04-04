@@ -78,6 +78,18 @@ def test_that_tree_probs_agree_with_explicit_computations():
     assert np.isclose(prob4, 0.4 * prob1 * prob3)
 
 
+def test_that_total_likelihood_exceeds_single_largest_likelihood():
+
+    grammar = Grammar(rulebooks)
+    tree = grammar.sample_tree()
+    sentence = tree.terminals
+
+    maximal = grammar.compute_maximal_probabilities(sentence)
+    summed = grammar.compute_inside_probabilities(sentence)
+
+    assert np.all(maximal <= summed + 1e-12), (sentence, maximal, summed)
+
+
 def pairwise_equalities(things):
     """ Return an array of item comparisons, avoiding self-comparisons. """
 
@@ -101,18 +113,18 @@ def test_that_sampling_methods_are_stochastic():
     assert not all(comparisons)  # they cannot all be different either
 
 
-def test_that_most_probable_tree_is_deterministic():
+def test_that_most_probable_always_returns_a_tree_of_the_same_logprob():
 
     grammar = Grammar(rulebooks)
     actual_tree = grammar.sample_tree()
     sentence = actual_tree.terminals
     inner = grammar.compute_inside_probabilities(sentence)
-    num_trials = 100
+    best_tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
+    best_logprob = grammar.logprob(best_tree)
 
-    trees = [grammar.compute_most_likely_tree(sentence, inner, root=0)
-             for _ in range(num_trials)]
-
-    assert all(pairwise_equalities(trees))
+    for _ in range(100):
+        tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
+        assert np.isclose(grammar.logprob(tree), best_logprob)
 
 
 def test_that_most_probable_tree_is_most_probable():
@@ -141,6 +153,7 @@ if __name__ == "__main__":
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
     test_that_grammar_computes_probabilities_in_the_right_range()
     test_that_tree_probs_agree_with_explicit_computations()
+    test_that_total_likelihood_exceeds_single_largest_likelihood()
     test_that_sampling_methods_are_stochastic()
     test_that_most_probable_tree_is_deterministic()
     test_that_most_probable_tree_is_most_probable()

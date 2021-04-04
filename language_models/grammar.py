@@ -210,7 +210,7 @@ class Grammar(dict):
             assert inside[0, -1, root] > 0
         dist = self.get_root_distribution(root)
         assert dist.shape == (len(self),)
-        dist *= inside[0, -1, :]
+        dist *= inside[0, -1, :]  # take the sentence likelihood into account
         assert np.any(dist > 0)
         dist /= np.sum(dist)
         root = np.argmax(dist)
@@ -227,23 +227,20 @@ class Grammar(dict):
         branchprobs /= np.sum(branchprobs)
 
         T, T, N = inside.shape
-        posteriors = np.zeros((T - 1, N, N))
+        joints = np.zeros((T - 1, N, N))
         for cut in range(1, T):
             leftprob = inside[0, cut - 1, :]
             rightprob = inside[cut, T - 1, :]
             likelihoods = leftprob[:, None] * rightprob[None, :]
-            posteriors[cut - 1, :, :] = branchprobs * likelihoods        
-        cutprobs = np.sum(posteriors, axis=(1, 2))
-        assert np.any(cutprobs > 0)
-        cut = 1 + np.argmax(cutprobs)
-        branchprob = posteriors[cut - 1, :, :]
-        assert np.all(branchprob.sum() >= posteriors.sum(axis=(1, 2)))
+            joints[cut - 1, :, :] = branchprobs * likelihoods
+        raveled = np.argmax(joints)
+        subcut, root_0, root_1 = np.unravel_index(raveled, joints.shape)
+        cut = 1 + subcut
+        branchprob = joints[cut - 1, :, :]
+        assert np.sum(branchprob) > 0
+        assert np.all(branchprob.max() == joints.max())
 
-        flatprob = branchprob.flatten() / np.sum(branchprob)
-        pair_idx = np.argmax(flatprob)
-        root_0, root_1 = np.divmod(pair_idx, branchprob.shape[0])
-        assert posteriors[cut - 1, root_0, root_1] > 0
-        assert posteriors[cut - 1, root_0, root_1] >= branchprob.max()
+        assert joints[cut - 1, root_0, root_1] > 0
 
         sentence_0 = sentence[:cut]
         inside_0 = inside[:cut, :cut, :]
@@ -320,24 +317,24 @@ class Grammar(dict):
 
         for start, character in enumerate(sentence):
             for k, rulebook in self.items():
-                bestprob = 0.0
-                for rule, newprob in rulebook.items():
+                for rule, prob in rulebook.items():
                     if type(rule) == str and rule == character:
-                        bestprob = max(bestprob, newprob)
-                        inside[start, start, k] = bestprob
+                        inside[start, start, k] = prob
 
         # TODO: fix this so it computes the right thing
         for width in range(2, len(sentence) + 1):
             for start in range(0, len(sentence) - width + 1):
                 stop = start + width
-                bestprobs = np.zeros(len(self))
+                # maximize over places to split the setence and
+                # pairs of child nodes that explain each part:
+                maxprobs = np.zeros(len(self))
                 for split in range(start + 1, stop):
                     left = inside[start, split - 1, :]
                     right = inside[split, stop - 1, :]
-                    coverprobs = left[:, None] * right[None, :]
-                    joints = np.sum(self.transitions * coverprobs, axis=(1, 2))
-                    bestprobs = np.maximum(bestprobs, joints)
-                    inside[start, stop - 1, :] = bestprobs
+                    fork = self.transitions * left[:, None] * right[None, :]
+                    fork = np.max(fork, axis=(1, 2))
+                    maxprobs = np.maximum(maxprobs, fork)
+                    inside[start, stop - 1, :] = maxprobs
         
         return inside
 
