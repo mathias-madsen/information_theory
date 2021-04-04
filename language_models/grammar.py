@@ -496,6 +496,12 @@ class Grammar(dict):
         return joints
     
     def sum_emission_probabilities(self, sentence, outside):
+        """ Sum up the joint emission probabilities given the sentence.
+        
+        The result is delivered in an array in the same shape as the
+        emissions matrix of the grammar. The entry at (k, i) contains
+        the sum of the probabilities P(X_t = i | Z_t = k) across t.
+        """
 
         _, _, num_nonterminals = outside.shape
         probs = np.zeros((num_nonterminals, len(self.alphabet)))

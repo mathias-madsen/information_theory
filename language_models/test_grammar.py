@@ -355,6 +355,31 @@ def test_that_transition_probabilities_are_well_calibrated():
     assert np.allclose(probsums, occursums, atol=0.1)
 
 
+def test_that_parameter_estimation_is_consistent():
+
+    grammar = Grammar(rulebooks)
+
+    sumemits = np.zeros_like(grammar.emissions)
+    sumtrans = np.zeros_like(grammar.transitions)
+
+    for _ in range(400):
+        tree = grammar.sample_tree(root=0)
+        word = tree.terminals
+        if len(word) > 25:
+            continue  # introduces slight bias, but saves a ton of time
+        inside = grammar.compute_inside_probabilities(word)
+        outside = grammar.compute_outside_probabilities(inside, initial=0)
+        sumemits += grammar.sum_emission_probabilities(word, outside)
+        sumtrans += grammar.sum_transition_probabilities(inside, outside)
+    
+    norms = np.sum(sumemits, axis=1) + np.sum(sumtrans, axis=(1, 2))
+    sumemits /= norms[:, None]
+    sumtrans /= norms[:, None, None]
+
+    assert np.allclose(grammar.emissions, sumemits, atol=0.1)
+    assert np.allclose(grammar.transitions, sumtrans, atol=0.1)
+
+
 if __name__ == "__main__":
 
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
@@ -372,6 +397,7 @@ if __name__ == "__main__":
     test_that_emission_probabilities_are_well_calibrated()
     test_that_transition_probabilities_are_in_the_right_range()
     test_that_transition_probabilities_are_well_calibrated()
+    test_that_parameter_estimation_is_consistent()
 
     # N, S = grammar.emissions.shape
     # randtrans = 0.2 * np.random.gamma(1.0, size=(N, N, N))
