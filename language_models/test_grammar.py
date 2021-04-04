@@ -33,7 +33,7 @@ rulebooks = {
 alphabet = "abcd"
 
 
-def _test_that_grammar_from_rulebooks_compiles_alphabet_correctly():
+def test_that_grammar_from_rulebooks_compiles_alphabet_correctly():
 
     grammar = Grammar(rulebooks)
     assert grammar.alphabet == tuple("abcd")
@@ -45,7 +45,7 @@ def _test_that_grammar_from_rulebooks_compiles_alphabet_correctly():
     assert grammar.alphabet == tuple("abcdX")
 
 
-def _test_that_grammar_computes_probabilities_in_the_right_range():
+def test_that_grammar_computes_probabilities_in_the_right_range():
 
     grammar = Grammar(rulebooks)
 
@@ -57,7 +57,7 @@ def _test_that_grammar_computes_probabilities_in_the_right_range():
         assert np.isclose(np.exp(logprob), prob)
 
 
-def _test_that_tree_probs_agree_with_explicit_computations():
+def test_that_tree_probs_agree_with_explicit_computations():
 
     grammar = Grammar(rulebooks)
 
@@ -85,7 +85,7 @@ def pairwise_equalities(things):
                      for j in range(i + 1, len(things))])
 
 
-def _test_that_sampling_methods_are_stochastic():
+def test_that_sampling_methods_are_stochastic():
 
     grammar = Grammar(rulebooks)
     trees = [grammar.sample_tree(root=0) for _ in range(100)]
@@ -101,7 +101,7 @@ def _test_that_sampling_methods_are_stochastic():
     assert not all(comparisons)  # they cannot all be different either
 
 
-def _test_that_most_probable_tree_is_deterministic():
+def test_that_most_probable_tree_is_deterministic():
 
     grammar = Grammar(rulebooks)
     actual_tree = grammar.sample_tree()
@@ -115,7 +115,7 @@ def _test_that_most_probable_tree_is_deterministic():
     assert all(pairwise_equalities(trees))
 
 
-def _test_that_most_probable_tree_is_most_probable():
+def test_that_most_probable_tree_is_most_probable():
 
     grammar = Grammar(rulebooks)
 
@@ -138,12 +138,12 @@ def _test_that_most_probable_tree_is_most_probable():
 
 if __name__ == "__main__":
 
-    _test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
-    _test_that_grammar_computes_probabilities_in_the_right_range()
-    _test_that_tree_probs_agree_with_explicit_computations()
-    _test_that_sampling_methods_are_stochastic()
-    _test_that_most_probable_tree_is_deterministic()
-    _test_that_most_probable_tree_is_most_probable()
+    test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
+    test_that_grammar_computes_probabilities_in_the_right_range()
+    test_that_tree_probs_agree_with_explicit_computations()
+    test_that_sampling_methods_are_stochastic()
+    test_that_most_probable_tree_is_deterministic()
+    test_that_most_probable_tree_is_most_probable()
     
     # # assert grammar_is_normalized(codex)  # TODO: write normalizer
     # grammar = Grammar(rulebooks=rulebooks, alphabet=alphabet)
