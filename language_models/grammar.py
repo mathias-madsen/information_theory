@@ -18,19 +18,21 @@ class Grammar(dict):
 
     def __init__(self, rulebooks=None, alphabet=None, transitions=None, emissions=None):
 
-        self.transitions = None
-        self.emissions = None
-        self.alphabet = None
+        self.transitions = transitions
+        self.emissions = emissions
+        self.alphabet = tuple(alphabet) if alphabet is not None else None
 
         if rulebooks is not None:
-            self.update_from_rulebooks(rulebooks, alphabet)
+            self.update_from_rulebooks(rulebooks)
         elif transitions is not None and emissions is not None:
-            self.update_from_matrices(transitions, emissions, alphabet)
+            self.update_from_matrices(transitions, emissions)
         else:
             raise ValueError("Please provide either rulebooks or matrices.")
     
     def validate(self):
         """ Check that all stochastic constraints are satisfied. """
+
+        assert self.alphabet is not None
 
         # This check probably shouldn't live here, but we want to
         # verify that all the rulebooks are in Chomsky normal form:
@@ -56,19 +58,17 @@ class Grammar(dict):
 
         for rulebook in self.values():
             for expansion in rulebook.keys():
-                if type(expansion) == str:
+                if type(expansion) != tuple:
                     terminals.add(expansion)
         
         return terminals
     
-    def update_from_rulebooks(self, rulebooks, alphabet=None):
+    def update_from_rulebooks(self, rulebooks):
         """ Convert a dict of nonterminal rulebooks to matrix form. """
 
         self.update(rulebooks)
 
-        if alphabet is not None:
-            self.alphabet = tuple(alphabet)
-        else:
+        if self.alphabet is None:
             self.alphabet = tuple(sorted(self.collect_terminals()))
 
         num_nonterminals = len(rulebooks)
@@ -77,7 +77,7 @@ class Grammar(dict):
 
         for k, rulebook in self.items():
             for rule, probability in rulebook.items():
-                if type(rule) == str:
+                if type(rule) != tuple:
                     # if we used dicts here, we could allow the
                     # alphabet to be infinite, but at the cost
                     # of having for parameterize the fallback
@@ -92,17 +92,21 @@ class Grammar(dict):
         self.emissions = emissions
         self.validate()
     
-    def update_from_matrices(self, transitions, emissions, alphabet=None):
+    def update_from_matrices(self, transitions, emissions):
         """ Convert transition and emission matrices to rulebooks. """
+
+        assert np.ndim(transitions) == 3
+        assert np.ndim(emissions) == 2
+        assert len(transitions) == len(emissions)
+        assert len(set(transitions.shape)) == 1  # all the same
 
         self.transitions = transitions
         self.emissions = emissions
 
-        if alphabet is not None:
-            self.alphabet = tuple(alphabet)
-        else:
-            len_alphabet = self.emissions.shape[1]
-            self.alphabet = tuple(chr(i) for i in range(len_alphabet))
+        assert self.alphabet is not None
+        # if self.alphabet is None:
+        #     len_alphabet = self.emissions.shape[1]
+        #     self.alphabet = tuple(chr(i) for i in range(len_alphabet))
 
         rulebooks = dict()
 
@@ -116,7 +120,7 @@ class Grammar(dict):
             for idx, prob in enumerate(probc):
                 character = self.alphabet[idx]
                 rulebooks[k][character] = prob
-        
+
         self.update(rulebooks)
         self.validate()
 
@@ -265,7 +269,7 @@ class Grammar(dict):
 
         if len(tree) == 1:
             child = tree[0]  # a string terminal
-            assert type(child) == str
+            assert type(child) != tuple
             return np.log(self[tree.head][child])
         else:
             children = tuple(branch.head for branch in tree)
@@ -355,7 +359,7 @@ class Grammar(dict):
         for start, character in enumerate(sentence):
             for k, rulebook in self.items():
                 for rule, prob in rulebook.items():
-                    if type(rule) == str and rule == character:
+                    if type(rule) != tuple and rule == character:
                         inside[start, start, k] = prob
 
         # TODO: fix this so it computes the right thing
@@ -385,7 +389,7 @@ class Grammar(dict):
         for start, character in enumerate(sentence):
             for k, rulebook in self.items():
                 for rule, probability in rulebook.items():
-                    if type(rule) == str and rule == character:
+                    if type(rule) != tuple and rule == character:
                         inside[start, start, k] += probability
 
         for width in range(2, len(sentence) + 1):
