@@ -47,13 +47,41 @@ def test_that_grammar_from_rulebooks_compiles_alphabet_correctly():
     assert grammar.alphabet == tuple("abcdX")
 
 
+def test_that_grammar_equality_works_as_expected():
+
+    rulebooks1 = rulebooks.copy()
+    
+    rulebooks2 = rulebooks.copy()
+    rulebooks2[3] = {"c": 0.3, "d": 0.7}
+    
+    rulebooks3 = rulebooks.copy()
+    rulebooks3[0] = {(1, 1): 1.0}
+
+    grammar0 = Grammar(rulebooks)
+    grammar1 = Grammar(rulebooks1)
+    grammar2 = Grammar(rulebooks2)
+    grammar3 = Grammar(rulebooks3)
+
+    assert grammar0 == grammar0
+    assert grammar0 == grammar1
+    assert grammar1 == grammar1
+
+    assert grammar2 == grammar2
+    assert grammar0 != grammar2
+    assert grammar2 != grammar0
+
+    assert grammar0 != grammar3
+    assert grammar1 != grammar3
+    assert grammar2 != grammar3
+
+
 def test_that_grammar_computes_probabilities_in_the_right_range():
 
     grammar = Grammar(rulebooks)
 
     for tree in grammar.sample_tree():
-        logprob = grammar.logprob(tree)
-        prob = grammar.prob(tree)
+        logprob = grammar.logprob_tree(tree)
+        prob = grammar.prob_tree(tree)
         assert -np.inf < logprob <= 0.0
         assert 0.0 < prob <= 1.0
         assert np.isclose(np.exp(logprob), prob)
@@ -73,19 +101,19 @@ def test_that_tree_probs_agree_with_explicit_computations():
     grammar = Grammar(frozen)
 
     tree1 = Tree(1, ["a"])
-    prob1 = grammar.prob(tree1)
+    prob1 = grammar.prob_tree(tree1)
     assert np.isclose(prob1, 0.5)
 
     tree2 = Tree(2, ["b"])
-    prob2 = grammar.prob(tree2)
+    prob2 = grammar.prob_tree(tree2)
     assert np.isclose(prob2, 0.7)
 
     tree3 = Tree(1, [tree1, tree2])  # 1 --> (1, 2)
-    prob3 = grammar.prob(tree3)
+    prob3 = grammar.prob_tree(tree3)
     assert np.isclose(prob3, 0.2 * prob1 * prob2)
 
     tree4 = Tree(0, [tree1, tree3])  # 0 --> (1, 1)
-    prob4 = grammar.prob(tree4)
+    prob4 = grammar.prob_tree(tree4)
     assert np.isclose(prob4, 0.4 * prob1 * prob3)
 
 
@@ -148,11 +176,11 @@ def test_that_most_probable_always_returns_a_tree_of_the_same_logprob():
     sentence = actual_tree.terminals
     inner = grammar.compute_inside_probabilities(sentence)
     best_tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
-    best_logprob = grammar.logprob(best_tree)
+    best_logprob = grammar.logprob_tree(best_tree)
 
     for _ in range(20):
         tree = grammar.compute_most_likely_tree(sentence, inner, root=0)
-        assert np.isclose(grammar.logprob(tree), best_logprob)
+        assert np.isclose(grammar.logprob_tree(tree), best_logprob)
 
 
 def test_that_most_probable_tree_is_most_probable():
@@ -160,19 +188,19 @@ def test_that_most_probable_tree_is_most_probable():
     grammar = Grammar(rulebooks)
 
     actual_tree = grammar.sample_tree(root=0)
-    actual_logprob = grammar.logprob(actual_tree)
+    actual_logprob = grammar.logprob_tree(actual_tree)
     sentence = actual_tree.terminals
 
     inner = grammar.compute_inside_probabilities(sentence)
     max_logprob = np.sum(inner[0, -1, :])
     best_tree = grammar.compute_most_likely_tree(sentence, root=0)
-    best_logprob = grammar.logprob(best_tree)
+    best_logprob = grammar.logprob_tree(best_tree)
     assert actual_logprob <= best_logprob + 1e-14, (actual_logprob, best_logprob)
     assert best_logprob <= max_logprob  # total likelihood across trees
 
     for _ in range(10):
         random_tree = grammar.conditionally_sample_tree(sentence, inner, root=0)
-        random_logprob = grammar.logprob(random_tree)
+        random_logprob = grammar.logprob_tree(random_tree)
         assert random_logprob <= best_logprob + 1e-14, (random_logprob, best_logprob)
 
 
@@ -188,7 +216,7 @@ def test_that_conditional_probability_agrees_with_alternative_computation():
     assert word_likelihood > 0
 
     # compute the conditional probability of the tree given the letters:
-    conditional_logprob = grammar.logprob(tree) - np.log(word_likelihood)
+    conditional_logprob = grammar.logprob_tree(tree) - np.log(word_likelihood)
     conditional_prob = np.exp(conditional_logprob)
 
     # perform the same computation using the method:
@@ -383,6 +411,7 @@ def test_that_parameter_estimation_is_consistent():
 if __name__ == "__main__":
 
     test_that_grammar_from_rulebooks_compiles_alphabet_correctly()
+    test_that_grammar_equality_works_as_expected()
     test_that_grammar_computes_probabilities_in_the_right_range()
     test_that_tree_probs_agree_with_explicit_computations()
     test_that_total_likelihood_exceeds_single_largest_likelihood()

@@ -32,7 +32,7 @@ class Tree(list):
         if len(self) != len(other):
             return False
         return all(a == b for a, b in zip(self, other))
-
+    
     def collect_terminals(self):
         """ Flatten the tree into a list of terminal strings. """
         return sum([b.terminals if type(b) == Tree else [b] for b in self], [])

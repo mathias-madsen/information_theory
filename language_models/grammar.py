@@ -266,12 +266,12 @@ class Grammar(dict):
         sentence_0 = sentence[:cut]
         inside_0 = inside[:cut, :cut, :]
         branch_0 = self.compute_most_likely_tree(sentence_0, inside_0, root_0)
-        assert self.logprob(branch_0) > -np.inf
+        assert self.logprob_tree(branch_0) > -np.inf
 
         sentence_1 = sentence[cut:]
         inside_1 = inside[cut:, cut:, :]
         branch_1 = self.compute_most_likely_tree(sentence_1, inside_1, root_1)
-        assert self.logprob(branch_1) > -np.inf
+        assert self.logprob_tree(branch_1) > -np.inf
 
         assert sentence == sentence_0 + sentence_1
         assert root_0 == branch_0.head
@@ -281,7 +281,7 @@ class Grammar(dict):
 
         return Tree(root, [branch_0, branch_1])
     
-    def logprob(self, tree):
+    def logprob_tree(self, tree):
         """ Compute the logarithmic probability of a tree in this grammar. """
 
         if len(tree) == 1:
@@ -291,9 +291,14 @@ class Grammar(dict):
         else:
             children = tuple(branch.head for branch in tree)
             logprob = np.log(self[tree.head][children])
-            logprob += sum(self.logprob(branch) for branch in tree)
+            logprob += sum(self.logprob_tree(branch) for branch in tree)
             return logprob
-    
+
+    def prob_tree(self, tree):
+        """ Compute the probability of a tree in this grammar. """
+
+        return np.exp(self.logprob_tree(tree))
+
     def conditional_prob(self, tree, inner=None, root=None):
         """ Compute the conditional probability of tree given terminals. """
 
@@ -314,16 +319,11 @@ class Grammar(dict):
         if rootprob == 0.0:
             return 0.0
 
-        lognumerator = self.logprob(tree) + np.log(rootprob)
+        lognumerator = self.logprob_tree(tree) + np.log(rootprob)
         logconditional = lognumerator - np.log(denom)
 
         return np.exp(logconditional)
 
-    def prob(self, tree):
-        """ Compute the probability of a tree in this grammar. """
-
-        return np.exp(self.logprob(tree))
-    
     def compute_occupancy_probabilities(self, sentence, root=None):
         """ For each nonterminal slot, get the possibility it is filled. """
 
