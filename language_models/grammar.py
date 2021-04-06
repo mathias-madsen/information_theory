@@ -51,6 +51,23 @@ class Grammar(dict):
         esums = self.emissions.sum(axis=1)
         assert np.allclose(tsums + esums, 1.0), (tsums + esums)
     
+    def save_as(self, filepath):
+        """ Save the grammar in as an NPZ file. """
+
+        assert type(self.alphabet) in [list, tuple]
+
+        np.savez(filepath,
+                 transmissions=self.transitions,
+                 emissions=self.emissions,
+                 alphabet=self.alphabet)
+    
+    def load_from(self, filepath):
+        """ Restore the grammar to parameters saved in an NPZ file. """
+
+        with np.load(filepath) as archive:
+            self.alphabet = tuple(archive.alphabet.to_list())
+            self.update_from_matrices(archive.transitions, archive.emissions)
+
     def collect_terminals(self):
         """ Compile a set of terminals mentioned in the rulebooks. """
 
@@ -398,9 +415,8 @@ class Grammar(dict):
                 for split in range(start + 1, stop):
                     left = inside[start, split - 1, :]
                     right = inside[split, stop - 1, :]
-                    coverprobs = left[:, None] * right[None, :]
-                    joints = np.sum(self.transitions * coverprobs, axis=(1, 2))
-                    inside[start, stop - 1, :] += joints
+                    forkprobs = self.transitions * left[:, None] * right[None, :]
+                    inside[start, stop - 1, :] += np.sum(forkprobs, axis=(1, 2))
         
         return inside
 
