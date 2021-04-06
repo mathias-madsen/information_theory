@@ -56,11 +56,13 @@ def split_list(elements, min_chunk_size=1000):
 
 if __name__ == "__main__":
 
-    chunk_size = 100
+    chunk_size = 1000
 
     with open("long_text.txt", "r") as source:
         words = extract_words(source.read())
-        words = list(set(words))  # do not repeat frequent words
+        wordcounts = dict(zip(*np.unique(words, return_counts=True)))
+        words = [w for w in words if wordcounts[w] > 10]  # remove freaks
+        # words = list(set(words))  # do not repeat frequent words
         # words = [w for w in words if 5 <= len(w) <= 20]
 
     letters, counts = np.unique(list("".join(words)), return_counts=True)
@@ -82,9 +84,9 @@ if __name__ == "__main__":
     print(", ".join("%r" % w for w in np.random.choice(words, size=50)))
     print("\n")
 
-    grammar = create_random_grammar(80)
+    grammar = create_random_grammar(10)
 
-    for epochidx in range(5):
+    for epochidx in range(10):
 
         grammar.save_as("wordgrammar.npz")
 
@@ -94,9 +96,9 @@ if __name__ == "__main__":
                   (epochidx + 1, updateidx + 1, len(chunks)))
 
             # initialize accumulators with a few virtual observations:
-            sumtrans = 5.0 * grammar.transitions.copy()
-            sumemits = 5.0 * grammar.emissions.copy()
-            sumemits += 1.0 * freqs
+            sumtrans = 0.01 * len(chunk) * grammar.transitions.copy()
+            sumemits = 0.01 * len(chunk) * grammar.emissions.copy()
+            sumemits += 1e-5 * len(chunk) * freqs  # fallback: letter freqs
 
             relative_losses = []
             monogram_losses = []
