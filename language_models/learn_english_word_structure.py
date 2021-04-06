@@ -72,6 +72,10 @@ if __name__ == "__main__":
 
     # words = list(set(words))  # do not repeat frequent words
     # words = [w for w in words if 5 <= len(w) <= 20]
+    print("Loaded a data set of %s words.\n" % len(words))
+    print("Example words from the data set:\n")
+    print(", ".join("%r" % w for w in np.random.choice(words, size=50)))
+    print("")
 
     letters, counts = np.unique(list("".join(words)), return_counts=True)
     counts += 100  # add virtual observations of each letter
@@ -82,17 +86,10 @@ if __name__ == "__main__":
     chunks = split_list(words, chunk_size)
     num_chunks = len(chunks)
     chunks = [chunks[i] for i in np.random.permutation(num_chunks)]
-
-    print("Loaded a data set of %s words.\n" % len(words))
-
     print("The data was split up into %s chunks of size %s.\n"
           % (num_chunks, chunk_size))
 
-    print("Example words from the data set:\n")
-    print(", ".join("%r" % w for w in np.random.choice(words, size=50)))
-    print("\n")
-
-    grammar = create_random_grammar(10)
+    grammar = create_random_grammar(20)
 
     for epochidx in range(10):
 
