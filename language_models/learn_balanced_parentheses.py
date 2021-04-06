@@ -63,7 +63,7 @@ if __name__ == "__main__":
 
     for updateidx in range(30):
 
-        print("--- Epoch %s ---" % (updateidx + 1))
+        print("--- Step %s ---" % (updateidx + 1))
 
         # initialize accumulators with a few virtual observations:
         sumtrans = 0.5 * estimated_grammar.transitions.copy()
@@ -80,8 +80,7 @@ if __name__ == "__main__":
             outer = estimated_grammar.compute_outside_probabilities(inner, initial=0)
             sumtrans += estimated_grammar.sum_transition_probabilities(inner, outer)
             sumemits += estimated_grammar.sum_emission_probabilities(sentence, outer)
-            loglike = np.log(inner[0, -1, 0])
-            losses.append((-1) * loglike / len(sentence))
+            losses.append((-1) * np.log(inner[0, -1, 0]) / len(sentence))
 
         statsloss = np.mean(losses), np.std(losses)
         print("Mean loss per character: %.3f ± %.3f bits." % statsloss)
