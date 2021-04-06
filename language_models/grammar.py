@@ -299,7 +299,7 @@ class Grammar(dict):
 
         return np.exp(self.logprob_tree(tree))
 
-    def conditional_prob(self, tree, inner=None, root=None):
+    def conditional_prob_tree(self, tree, inner=None, root=None):
         """ Compute the conditional probability of tree given terminals. """
 
         if inner is None:

@@ -220,7 +220,7 @@ def test_that_conditional_probability_agrees_with_alternative_computation():
     conditional_prob = np.exp(conditional_logprob)
 
     # perform the same computation using the method:
-    by_method = grammar.conditional_prob(tree, root=0)
+    by_method = grammar.conditional_prob_tree(tree, root=0)
 
     assert np.isclose(conditional_prob, by_method)
 
@@ -236,7 +236,7 @@ def test_that_tree_prob_is_well_calibrated():
             break
     
     inner = grammar.compute_inside_probabilities(word)
-    conditional_prob = grammar.conditional_prob(tree, inner, root=0)
+    conditional_prob = grammar.conditional_prob_tree(tree, inner, root=0)
 
     # empiricall estimate the conditional frequency of the tree:
     sample = lambda: grammar.conditionally_sample_tree(word, inner, root=0)
