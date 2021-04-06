@@ -27,7 +27,7 @@ def create_random_grammar(num_nonterminals=4):
                    alphabet=alphabet)
 
 
-def extract_words(text):
+def extract_words(text, minfreq=10, shuffle=True):
 
     word_pattern = """
         \s  # whitespace before
@@ -37,7 +37,16 @@ def extract_words(text):
         \s    # whitespace after
         """
 
-    return re.findall(word_pattern, text, re.VERBOSE)
+    words = re.findall(word_pattern, text, re.VERBOSE)
+
+    if shuffle:
+        np.random.shuffle(words)
+    
+    if minfreq > 1:
+        wordcounts = dict(zip(*np.unique(words, return_counts=True)))
+        words = [w for w in words if wordcounts[w] >= minfreq]
+
+    return words
 
 
 def split_list(elements, min_chunk_size=1000):
@@ -59,11 +68,10 @@ if __name__ == "__main__":
     chunk_size = 1000
 
     with open("long_text.txt", "r") as source:
-        words = extract_words(source.read())
-        wordcounts = dict(zip(*np.unique(words, return_counts=True)))
-        words = [w for w in words if wordcounts[w] > 10]  # remove freaks
-        # words = list(set(words))  # do not repeat frequent words
-        # words = [w for w in words if 5 <= len(w) <= 20]
+        words = extract_words(source.read(), shuffle=True, minfreq=10)
+
+    # words = list(set(words))  # do not repeat frequent words
+    # words = [w for w in words if 5 <= len(w) <= 20]
 
     letters, counts = np.unique(list("".join(words)), return_counts=True)
     counts += 100  # add virtual observations of each letter
