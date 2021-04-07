@@ -1,3 +1,16 @@
+"""
+Demo script showing that the learning of a stocastic, context-free
+grammar using the EM algorithm in the well-specified case.
+
+The target grammar assigns probability zero to a large subset of all
+possible sentences, so we can evaluate the estimated grammar on its
+rate of false positives (the probability of sampling a sentence that
+the true target grammar considers impossible).
+
+Training takes on the order of 100 update steps, with each update step
+taking on the order of 10 seconds (on my machine).
+"""
+
 import numpy as np
 from tqdm import tqdm
 
@@ -52,21 +65,21 @@ if __name__ == "__main__":
     reality = Grammar(rulebooks)
     model = sample_random_grammar_like(reality)
 
-    for updatestep in range(50):
+    for updatestep in range(100):
 
         print("--- Update %s ---\n" % (updatestep + 1,))
 
         # initialize counts with virtual observations:
-        sumemits = 0.1 * model.emissions.copy()
-        sumtrans = 0.1 * model.transitions.copy()
+        sumemits = 10.0 * model.emissions.copy()
+        sumtrans = 10.0 * model.transitions.copy()
 
         print("Training . . .")
         true_likelihoods = []
         model_likelihoods = []
-        for _ in tqdm(range(400), leave=False, unit="words"):
+        for _ in tqdm(range(1000), leave=False, unit="words"):
             actual_tree = reality.sample_tree(root=0)
             sentence = actual_tree.terminals
-            if len(sentence) > 20:
+            if len(sentence) > 30 and updatestep <= 25:
                 continue  # slight bias, massive speedup
             inside = model.compute_inside_probabilities(sentence)
             outside = model.compute_outside_probabilities(inside, initial=0)
@@ -79,22 +92,17 @@ if __name__ == "__main__":
 
         print("Validating . . .")
         judgments = []
-        for _ in tqdm(range(200), leave=False, unit="samples"):
+        for _ in tqdm(range(300), leave=False, unit="samples"):
             sampled = model.sample_tree().terminals
             inner = reality.compute_inside_probabilities(sampled)
-            was_impossible =  np.isclose(inner[0, -1, 0], 0.0)
-            judgments.append(was_impossible)
+            judgments.append(inner[0, -1, 0] == 0.0)
         print()
 
         print("Average negative log-likelihood:")
         print("--------------------------------")
         print("Oracle: %.5f" % np.mean(-np.log(true_likelihoods)))
         print("Model: %.5f" % np.mean(-np.log(model_likelihoods)))
-        print()
-
-        print("Number of ungrammatical samples:")
-        print("--------------------------------")
-        print("%s / %s" % (sum(judgments), len(judgments)))
+        print("False positives: %s / %s" % (sum(judgments), len(judgments)))
         print()
 
         norms = np.sum(sumemits, axis=1) + np.sum(sumtrans, axis=(1, 2))
