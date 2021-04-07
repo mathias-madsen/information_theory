@@ -38,6 +38,7 @@ class Grammar(dict):
         # verify that all the rulebooks are in Chomsky normal form:
         for nonterminal, rulebook in self.items():
             for expansion in rulebook.keys():
+                assert type(expansion) in [tuple, str, int], expansion
                 branching = type(expansion) == tuple and len(expansion) == 2
                 closing = type(expansion) in [str, int]
                 assert branching or closing, (nonterminal, expansion)
