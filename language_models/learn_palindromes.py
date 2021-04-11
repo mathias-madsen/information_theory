@@ -4,6 +4,10 @@ Example training script showing how to learn a palindrome grammar.
 The training sentences are sampled from an explicitly given stochastic
 context-free grammar over palindromes with the letters 'a' and 'b',
 such as 'abba' and 'babab'.
+
+Training takes about the same time as it takes to boil an egg and
+usually results in an error rate below one in a thousand -- although
+it is a non-convex problem, and there are bad local minima.
 """
 
 import re
@@ -20,22 +24,22 @@ def create_random_grammar(num_nonterminals, alphabet):
     N = num_nonterminals
     T = len(alphabet)
 
-    transitions = np.random.gamma(10.0, size=(N, N, N))
+    transitions = np.random.gamma(0.1, size=(N, N, N))
     transitions /= np.sum(transitions, axis=(1, 2), keepdims=True)
 
-    emissions = np.random.gamma(10.0, size=(N, T))
+    emissions = np.random.gamma(0.1, size=(N, T))
     emissions /= np.sum(emissions, axis=1, keepdims=True)
 
     # make sure that the typical sentence is short:
-    transitions *= 0.25
-    emissions *= 0.75
+    transitions *= 0.3
+    emissions *= 0.7
 
     return Grammar(transitions=transitions,
                    emissions=emissions,
                    alphabet=alphabet)
 
 
-def get_palindrome_grammar(prob_recursive=0.6):
+def get_palindrome_grammar(prob_recursive=0.5):
     """ Construct a palindrome grammar.
 
     `prob_recursive` is the probability of applying the recursive
@@ -49,30 +53,40 @@ def get_palindrome_grammar(prob_recursive=0.6):
     will be slower.
     """
 
-    PALINDROME, A, B, PALINDROME_A, PALINDROME_B = range(5)
+    ROOT, A, B, C, ROOT_A, ROOT_B, ROOT_C = range(7)
 
+    # even- and odd-length palindromes:
     prob_double = (1 - prob_recursive) / 2
     prob_single = (1 - prob_recursive) / 2
 
+    # only even-length palindromes:
+    # prob_double = (1 - prob_recursive)
+    # prob_single = 0.0
+
     palindrome_rules = {
 
-        PALINDROME: {
+        ROOT: {
             # recurse:
-            (A, PALINDROME_A): prob_recursive / 2,
-            (B, PALINDROME_B): prob_recursive / 2,
+            (A, ROOT_A): prob_recursive / 3,
+            (B, ROOT_B): prob_recursive / 3,
+            (C, ROOT_C): prob_recursive / 3,
             # terminate in a pair (==> even-length sentence):
-            (A, A): prob_double / 2,
-            (B, B): prob_double / 2,
+            (A, A): prob_double / 3,
+            (B, B): prob_double / 3,
+            (C, C): prob_double / 3,
             # terminate in a letter (==> odd-length sentence):
-            "a": prob_single / 2,
-            "b": prob_single / 2,
+            "a": prob_single / 3,
+            "b": prob_single / 3,
+            "c": prob_single / 3,
         },
 
         A: {"a": 1.0},
         B: {"b": 1.0},
+        C: {"c": 1.0},
 
-        PALINDROME_A: {(PALINDROME, A): 1.0},
-        PALINDROME_B: {(PALINDROME, B): 1.0},
+        ROOT_A: {(ROOT, A): 1.0},
+        ROOT_B: {(ROOT, B): 1.0},
+        ROOT_C: {(ROOT, C): 1.0},
 
     }
 
@@ -83,14 +97,14 @@ if __name__ == "__main__":
 
     start_time = time.perf_counter()
     true_grammar = get_palindrome_grammar()
-    estimated_grammar = create_random_grammar(len(true_grammar),
+    estimated_grammar = create_random_grammar(2 * len(true_grammar),
                                               true_grammar.alphabet)
 
     for epochidx in range(100):
 
-        # initialize accumulators with a few virtual observations:
-        sumtrans = 1. * estimated_grammar.transitions.copy()
-        sumemits = 1. * estimated_grammar.emissions.copy()
+        # initialize accumulators with a lot of virtual observations:
+        sumtrans = 400. * estimated_grammar.transitions.copy()
+        sumemits = 400. * estimated_grammar.emissions.copy()
 
         print(("*** UPDATE NUMBER %s ***" % (epochidx + 1,)).center(72))
         print()
@@ -98,7 +112,7 @@ if __name__ == "__main__":
         losses = []
         reflosses = []
         refgoods = defaultdict(list)
-        for _ in tqdm(range(3000), leave=False, unit="words"):
+        for _ in tqdm(range(400), leave=False, unit="words"):
             sentence = true_grammar.sample_tree().terminals
             # compute the contributions to the parameter update:
             inner = estimated_grammar.compute_inside_probabilities(sentence)
@@ -121,9 +135,16 @@ if __name__ == "__main__":
         print()
 
         isgoods = defaultdict(list)
-        for _ in range(len(losses)):
-            sentence = estimated_grammar.sample_tree().terminals
-            isgoods[len(sentence)].append(sentence == sentence[::-1])
+        numgood = 0
+        numtotal = 0
+        for _ in range(1000):
+            snt = estimated_grammar.sample_tree().terminals
+            halflen = len(snt) // 2
+            numgood += sum(snt[i] == snt[len(snt) - 1 - i] for i in range(halflen))
+            numtotal += halflen
+            isgoods[len(snt)].append(snt == snt[::-1])
+        print("Correctly constrained letters: %s / %s = %.1f pct.\n"
+              % (numgood, numtotal, 100.0 * numgood / numtotal))
         print("Number of palindromes:")
         print("----------------------")
         for length in range(2, 16):
@@ -150,6 +171,6 @@ if __name__ == "__main__":
         print("")
 
         duration = time.perf_counter() - start_time
-        print("%.1f minutes since start." % (duration / 60.))
+        print("Time since start: %02d:%.02d." % np.divmod(duration, 60))
         print()
 
