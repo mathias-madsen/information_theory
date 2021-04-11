@@ -112,7 +112,7 @@ if __name__ == "__main__":
         losses = []
         reflosses = []
         refgoods = defaultdict(list)
-        for _ in tqdm(range(400), leave=False, unit="words"):
+        for _ in tqdm(range(500), leave=False, unit="words"):
             sentence = true_grammar.sample_tree().terminals
             # compute the contributions to the parameter update:
             inner = estimated_grammar.compute_inside_probabilities(sentence)
