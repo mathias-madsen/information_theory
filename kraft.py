@@ -27,8 +27,9 @@ def build_prefix_code(requested_lengths: List[int],
     Notes:
     ------
     This function implements a greedy code construction algorithm which
-    builds the prefix shortest-word-first, removing from consideration
-    all extensions of a codeword whenever it is added to the codebook.
+    builds the prefix code shortest-word-first, adding available codewords
+    as necessary, and removing all possible extensions of a codeword
+    whenever it is added to the codebook.
     """
     
     # complain if Kraft's inequality is violated:
