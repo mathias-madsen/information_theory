@@ -37,20 +37,19 @@ def build_prefix_code(requested_lengths: List[int],
         raise ValueError("Codeword lengths %r violate Kraft's inequality."
                          % requested_lengths)
 
-    # we step through the tree of binary strings layer by layer,
-    # starting from the root and moving towards longer strings;
-    # whenever we use a string as a codeword, we remove all of its
-    # descendants from consideration as future codewords.
-    allowed_in_current_layer = [""]
+    # we step through the tree of binary strings by increasing length;
+    # whenever we use a string as a codeword, we remove its descendants
+    # from consideration as future codewords:
+    allowed_at_current_length = [""]
     codebook = []
     for current_length in range(max(requested_lengths) + 1):
-        # add the required number of codewords at this level (length)
-        # by grabbing them out of the list of unblocked prefixes:
+        # add the required number of codewords at this length
+        # by cutting them out of the list of available prefixes:
         num_required = sum(k == current_length for k in requested_lengths)
         for _ in range(num_required):
-            codebook.append(allowed_in_current_layer.pop(0))
+            codebook.append(allowed_at_current_length.pop(0))
         # extend all remaining prefixes by one more character:
-        allowed_in_current_layer = [p + s for p in allowed_in_current_layer
+        allowed_at_current_length = [p + s for p in allowed_at_current_length
                                     for s in alphabet]
     
     return codebook
