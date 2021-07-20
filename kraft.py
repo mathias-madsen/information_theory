@@ -4,7 +4,7 @@ from typing import Tuple
 
 def build_prefix_code(requested_lengths: List[int],
                       alphabet: Tuple[str] = ("0", "1")) -> List[str]:
-    """ Construct a binary prefix code of given code words lengths.
+    """ Construct a binary prefix code of given codeword lengths.
     
     Parameters:
     -----------
