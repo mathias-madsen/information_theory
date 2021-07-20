@@ -44,8 +44,8 @@ def build_prefix_code(requested_lengths: List[int],
     allowed_in_current_layer = [""]
     codebook = []
     for current_length in range(max(requested_lengths) + 1):
-        # convert prefixes of the current length into codewords
-        # until sufficiently many new codewords have been added:
+        # add the required number of codewords at this level (length)
+        # by grabbing them out of the list of unblocked prefixes:
         num_required = sum(k == current_length for k in requested_lengths)
         for _ in range(num_required):
             codebook.append(allowed_in_current_layer.pop(0))
