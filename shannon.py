@@ -22,101 +22,136 @@ For more information, contact me on mathias@micropsi-industries.com.
 """
 
 import numpy as np
+from typing import List
 
 
-def build_shannon_code(distribution):
-    """ Construct the Shannon code implied by the given distribution.
+def is_sorted(numbers: List[str]) -> bool:
+    """ Return true iff a list of numbers is in increasing order. """
 
-    Arguments:
-    ----------
-    distribution : dict
-        A letter distribution in the format {letter: probability}.
-
-    Returns:
-    --------
-    code : dict
-        A table of codewords in the format {letter: codeword}.
-    """
-
-    # Sort letters in decreasing order of probability:
-    letters = sorted(distribution, key=lambda letter: -distribution[letter])
-
-    probabilities = [distribution[letter] for letter in letters]
-    cumulative = np.cumsum([0] + probabilities)
-
-    ideal_codeword_widths = -np.log2(probabilities)
-    actual_widths = [int(width) for width in np.ceil(ideal_codeword_widths)]
-
-    codewords = []
-    for left_edge, width in zip(cumulative, actual_widths):
-        left_edge_rounded_down = int(2**width * left_edge)
-        codeword = np.binary_repr(left_edge_rounded_down, width=width)
-        codewords.append(codeword)
-
-    return {letter: codeword for letter, codeword in zip(letters, codewords)}
+    return all(a <= b for a, b in zip(numbers[:-1], numbers[1:]))
 
 
-def verify_codewords(codewords):
-    """ Verify that a list of codewords has the prefix property. """
+def compile_cumulatives(probs: List[float]) -> List[float]:
+    """ Compute the cumulative probabilities, starting from 0. """
+
+    total = 0.0
+    cumulatives = []
+    for prob in probs:
+        cumulatives.append(total)
+        total += prob
+    
+    return cumulatives
+
+
+def round_to_binary(number: float, nbits: int, direction: str = "down"):
+    """ Round a float to a binary fraction of a given precision. """
+
+    scaled = (2**nbits) * number
+
+    if direction == "down":
+        rounded = int(np.floor(scaled))
+    elif direction == "up":
+        rounded = int(np.ceil(scaled))
+    else:
+        raise Exception("Unknown direction %r" % direction)
+
+    return np.binary_repr(rounded, width=int(nbits))
+
+
+def build_shannon_code(probs: List[float]) -> List[str]:
+    """ Construct a Shannon code for a sorted list of probabilities. """
+
+    assert is_sorted(probs[::-1])
+    
+    lengths = np.ceil(-np.log2(probs))
+    cumulatives = compile_cumulatives(probs)
+
+    return [round_to_binary(c, w, direction="down")
+            for c, w in zip(cumulatives, lengths)]
+
+
+def build_fano_code(probs: List[float]) -> List[str]:
+    """ Construct a Shannon-Fano-Elias code for a distribution. """
+
+    lengths = np.ceil(-np.log2(probs)) + 1
+    cumulatives = compile_cumulatives(probs)
+
+    return [round_to_binary(c, w, direction="up")
+            for c, w in zip(cumulatives, lengths)]
+
+
+def is_prefix_free(codewords: List[float]) -> bool:
+    """ Return True iff the code satisfies the prefix property. """
 
     if not codewords:
         return  # an empty list has the prefix property
     
-    codewords = list(codewords)  # in case they are a dict_keys object
-    bits = set("".join(codewords))  # output alphabet
-    assert bits == set("01") or bits == set("0") or bits == set("1")
+    if any(codewords.count(w) > 1 for w in codewords):
+        return False  # a codeword appears twice
+
+    for w1 in codewords:
+        for w2 in codewords:
+            if w1 == w2:
+                continue  # we are comparing a word to itself: OK
+            elif len(w1) == len(w2):
+                continue  # they have the same length but differ: OK
+            elif len(w1) < len(w2):
+                if w2.startswith(w1):
+                    return False  # w1 is a prefix of w2
+            elif len(w2) < len(w1):
+                if w1.startswith(w2):
+                    return False  # w2 is a prefix of w1
+            else:
+                raise Exception("Unexpected error at (%r, %r)" % (w1, w2))
     
-    for i in range(len(codewords)):
-        for j in range(len(codewords)):
-            if i == j:
-                continue
-            wi = codewords[i]
-            wj = codewords[j]
-            assert not wi.startswith(wj), (wj, wi)
-            assert not wj.startswith(wi), (wi, wj)
-
-    # verify that the codewords satisfy Kraft's inequality:
-    assert sum(0.5 ** len(codeword) for codeword in codewords) <= 1, codewords
+    return True  # all comparisons above passed
 
 
-def entropies(distribution, code):
-    """ Compute the expected codeword length, and the entropy bound.
+def compute_entropy(probabilities: List[float]) -> float:
+    """ Compute the binary entropy of a distribution. """
 
-    Arguments:
-    ----------
-    distribution : dict
-        A distribution over letters in the format {letter: probability}.
-    code : dict
-        A table of codewords in the format {letter: codeword}.
-
-    Returns:
-    --------
-    true_entropy : float >= 0
-        The entropy of the letter distribution, in bits.
-    expected_codeword_length : float >= 0
-        The mean number of bits used to encode letters from the given
-        distribution when using the given code.
-    """
-
-    entropy = sum(-p*np.log2(p) for p in distribution.values() if p > 0)
-    mean_width = sum(p*len(code[a]) for a, p in distribution.items())
-    
-    return entropy, mean_width
+    return sum(-p*np.log2(p) for p in probabilities if p > 0)
 
 
-if __name__ == "__main__":
+def _test_shannon_coding() -> None:
+    """ Test that the Shannon codes are prefix-free and E(N) <= H + 1. """
 
     for size in [5, 10, 20]:
         for alpha in [0.2, 1.0, 10.]:
 
-            alphabet = [chr(i) for i in range(65, 91)]
-            letters = np.random.choice(alphabet, size=size, replace=False)
             probs = np.random.dirichlet(alpha * np.ones(size))
-            dist = {letter: prob for letter, prob in zip(letters, probs)}
+            probs = sorted(probs, reverse=True)  # in decreasing order
+            code = build_shannon_code(probs)
+            assert is_prefix_free(code)
 
-            code = shannon_code(dist)
-            verify_codewords(code.values())
-            
-            entropy, mean_width = entropies(dist, code)
-            assert entropy <= mean_width
-            assert entropy + 2 >= mean_width
+            entropy = compute_entropy(probs)
+            meanwidth = sum(p*len(w) for p, w in zip(probs, code))
+            assert entropy <= meanwidth <= entropy + 1
+
+
+def _test_fano_coding() -> None:
+    """ Test that the Shannon codes are prefix-free and E(N) <= H + 1. """
+
+    for size in [5, 10, 20]:
+        for alpha in [0.2, 1.0, 10.]:
+
+            probs = np.random.dirichlet(alpha * np.ones(size))
+            code = build_fano_code(probs)
+            assert is_prefix_free(code)
+
+            entropy = compute_entropy(probs)
+            meanwidth = sum(p*len(w) for p, w in zip(probs, code))
+            assert entropy <= meanwidth <= entropy + 2
+
+
+
+if __name__ == "__main__":
+
+    assert build_shannon_code([0.6, 0.4]) == ["0", "10"]
+    assert build_fano_code([0.6, 0.4]) == ["00", "101"]
+
+    assert build_shannon_code([0.5, 0.5]) == ["0", "1"]
+    assert build_fano_code([0.5, 0.5]) == ["00", "10"]
+
+    assert build_shannon_code([0.4, 0.3, 0.2, 0.1]) == ["00", "01", "101", "1110"]
+    assert build_fano_code([0.4, 0.3, 0.2, 0.1]) == ["000", "100", "1100", "11101"]
