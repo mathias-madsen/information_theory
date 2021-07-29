@@ -130,7 +130,7 @@ def _test_shannon_coding() -> None:
 
 
 def _test_fano_coding() -> None:
-    """ Test that the Shannon codes are prefix-free and E(N) <= H + 1. """
+    """ Test that the Shannon codes are prefix-free and E(N) <= H + 2. """
 
     for size in [5, 10, 20]:
         for alpha in [0.2, 1.0, 10.]:
