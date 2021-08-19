@@ -307,12 +307,104 @@ def _test_that_the_compression_is_lossless() -> None:
     assert grammar.expand() == list(text)
 
 
+def _test_that_grammar_satisfies_constraints() -> None:
+
+    import numpy as np
+
+    text = np.random.choice(list("abc"), size=100, replace=True).tolist()
+
+    grammar = Sequitur()
+    for char in text:
+        grammar.feed(char)
+
+    nonterminal_usage_counts = {k: 0 for k in grammar.rules}
+    for rule in grammar.rules.values():
+        elements = list(rule)
+        for char in elements[1:]:
+            if type(char) == int:
+                assert char in grammar.rules
+                assert char in grammar.uses
+                nonterminal_usage_counts[char] += 1
+
+    assert {v >= 2 or k == 0 for k, v in nonterminal_usage_counts.items()}
+
+    observed_digrams = set()
+    for rule in grammar.rules.values():
+        elements = list(rule)[1:]
+        prev = None
+        for curr in zip(elements[:-1], elements[1:]):
+            if curr == prev:  # overlapping with previous occurrence
+                assert curr in observed_digrams
+            else:   # must occur now for the first time
+                assert curr not in observed_digrams
+                observed_digrams.add(curr)
+                prev = curr
+
+
+def _test_that_the_grammar_agrees_with_certain_known_results() -> None:
+
+    # if you repeat a string 2**k times, the grammar is a binary tree:
+
+    grammar = Sequitur()
+    for char in (16 * "abc"):
+        grammar.feed(char)
+
+    _, i, j = list(grammar.rules[0])
+    assert i == j
+
+    _, i, j = list(grammar.rules[i])
+    assert i == j
+
+    _, i, j = list(grammar.rules[i])
+    assert i == j
+
+    _, i, j = list(grammar.rules[i])
+    assert i == j
+
+    _, a, b, c = list(grammar.rules[i])
+    assert (a, b, c) == ("a", "b", "c")
+
+    # if we present every pair of letters exactly once,
+    # no compression is possible, and no rules are invented:
+
+    alphabet = "abcdefgh"
+    text = ""
+    for i, a in enumerate(alphabet):
+        for b in alphabet[i:]:
+            text += a
+            text += b
+
+    grammar = Sequitur()
+    for char in text:
+        grammar.feed(char)
+
+    n = len(alphabet)
+    rhs = list(grammar.rules[0])[1:]
+    
+    assert len(grammar.rules) == 1
+    assert len(rhs) == n * (n + 1)
+
+    alphabet = "abcdefgh"
+    text = ""
+    for width in range(2, len(alphabet)):
+        text += alphabet[-width:]
+
+    grammar = Sequitur()
+    for char in text:
+        grammar.feed(char)
+
+    assert list(grammar.rules[0])[1:-2] == [1, 2, 3, 4, 5]
+    assert all(len(list(rule)[1:]) == 2 or rulenum == 0
+               for rulenum, rule in grammar.rules.items())
+
+
 if __name__ == "__main__":
 
     _test_agreement_with_example_from_figure_1b()
     _test_agreement_with_example_from_figure_1d()
     _test_agreement_with_pease_porridge()
     _test_that_the_compression_is_lossless()
+    _test_that_grammar_satisfies_constraints()
 
     text = "abcdabcdabcd"
     grammar = Sequitur()
