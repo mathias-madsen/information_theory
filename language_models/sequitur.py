@@ -99,6 +99,9 @@ class Sequitur:
         elif self.index[link].succ == x:
             # print("Link %r overlaps previous occurrence" % (link,))
             pass
+        elif self.index[link].succ == y:
+            assert False, link
+            pass
         elif self.is_full_rule(link):
             rulenum = self.index[link].pred.cargo
             # print("Link %r matches rule %s" % (link, list(self.rules[rulenum])))
@@ -298,13 +301,16 @@ def _test_that_the_compression_is_lossless() -> None:
 
     import numpy as np
 
-    text = np.random.choice(list("abcde"), size=100, replace=True)
+    letters = np.random.choice(list("abcde"), size=1000, replace=True)
+    text = "".join(letters.tolist())
 
     grammar = Sequitur()
     for char in text:
         grammar.feed(char)
 
-    assert grammar.expand() == list(text)
+    reconstruction = "".join(grammar.expand())
+
+    assert reconstruction == text, (reconstruction, text)
 
 
 def _test_that_grammar_satisfies_constraints() -> None:
@@ -334,9 +340,9 @@ def _test_that_grammar_satisfies_constraints() -> None:
         prev = None
         for curr in zip(elements[:-1], elements[1:]):
             if curr == prev:  # overlapping with previous occurrence
-                assert curr in observed_digrams
+                assert curr in observed_digrams, elements
             else:   # must occur now for the first time
-                assert curr not in observed_digrams
+                assert curr not in observed_digrams, elements
                 observed_digrams.add(curr)
                 prev = curr
 
@@ -405,6 +411,7 @@ if __name__ == "__main__":
     _test_agreement_with_pease_porridge()
     _test_that_the_compression_is_lossless()
     _test_that_grammar_satisfies_constraints()
+    _test_that_the_grammar_agrees_with_certain_known_results()
 
     text = "abcdabcdabcd"
     grammar = Sequitur()
