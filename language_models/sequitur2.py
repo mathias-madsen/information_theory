@@ -4,7 +4,7 @@ DIGRAM_INDEX = dict()
 
 def insert_into_index(pointer):
     global DIGRAM_INDEX
-    key = pointer.get_pair()
+    # key = pointer.get_pair()
     # print("Inserting %s into the index" % (key,))
     # if key in DIGRAM_INDEX:
     #     print("This will overwrite an existing entry.")
